@@ -25,17 +25,49 @@ Assumptions:
   * It assumes that you call `rustea` as root or with sudo if the configuration files are stored in a path unaccessable for our user
   * Authentication is used everytime
 
+Repository Setup:
+
+    Devops Repository:
+    |- File_1 <-- ignored
+    |- File_2 <-- ignored
+    +- feature_set_1/
+       +- scripts/ <-- folder containing script files
+          |- script_1
+          |- script_2
+       |- feature_1/ <-- A feature set contains feature folders
+       |- feature_2/ <-- The feature folder path is the resulting path in the fs.
+    +- feature_set_2/
+       |- feature_1/ <-- For example, /etc/postfix/ is stored under mail/etc/postfix/
+       |- File_1 <-- ignored
+
+As one can see, files in the root path and in the first level of a feature are ignored. This is
+intenionally, to allow readme files within feature sets, for example.
+
+
 ### Workflows
 
 *Prepare rustea*
   * Fetch the binary from somewhere
   * Create an inital configuration in `~/.rustea.toml` with `rustea`:
-      * The user has an api token for gitea `rustea conf --token <key> <url> <repository> <owner>`
-      * The user request a new API key with `rustea conf --name <token_name> <url> <repository> <owner>`
+      * The user has an api token for gitea `rustea init --token <key> <url> <repository> <owner>`
+      * The user request a new API key with `rustea init --name <token_name> <url> <repository> <owner>`
           * The user enters username and password when asked and the token is requested 
   * The configuration file is stored under `~/.rustea.toml` by default
       
-**
+*Show informations*
+  * The user can show informations about the gitea instance and the repository with `rustea info`
+  * The user can list all feature-sets in the repository with `rustea list`
+
+*Add a new feature set*
+  * The user creates a new feature set with `rustea new <name for the feature set>`
+  * This creates a new folder in the devops repository
+
+
+*Deploy a feature set to the machine*
+  * The user deploys a feature set with `rustea pull`
+      * For only deploying script files use `rustea pull --script`
+      * For only deploying configuration files use `rustea pull --config`
+  * `rustea` fetches the content of the feature set 
 
 ## Goals
 
@@ -63,3 +95,11 @@ The following goals shall be fullfilled with this little program:
 
 #### Why not git?
 
+## Tests
+
+The most tests assume that a `rustea.toml` ist located within the project root. Otherwise,
+most tests fail.
+
+Run from project the tests root with:
+
+    cargo test
