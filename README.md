@@ -1,16 +1,23 @@
 # rustea
 
 `rustea` is a small cli tool for handling configuration and script files. Thus, it shall be simple
-to deploy configurations directly from a Gitea instance and push changed configurations to it.
-It doesn't aim to replace full-fledged configuration management system for such an approach
-use a tool like Ansible or Chef or something else.
+to pull or deploy configurations directly from a Gitea instance or push configurations to it.
+It doesn't aim to replace full-fledged configuration management system. If your looking
+for such an approach use a tool like Ansible or Chef or something else like that.
 
 ## Overview
 
-`rustea` is a cli tool which connects to the API of a Gitea instances and allows to fetch und push
-files. This is mostly done to either deploy or save configuration files or script files.
-The (devops) repository has a special format which is explained later. Such that `rustea` deploys
-configuration files and script files correctly.
+`rustea` uses a git like semantics where configurations are either pushed to some Gitea instance
+or pulled to the local machine and copied to the correct place. It distinguishes between simple
+files and __script files__ which are simply executable files stored in a special location.
+As a remote store for the files a Gitea server with an enabled API is used.
+
+### Why?
+
+The main idea behind `rustea` is to have a single static binary for configuration or feature management
+of *nix machines. It shall allow version control but without the need of having a local `git` installation
+which is quite large. Also, I have a bunch of virtual machines which have no open ports or `ssh` is not
+an option which is required by most configuration management systems.
 
 ### Repository
 
