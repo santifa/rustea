@@ -57,17 +57,48 @@ intenionally, to allow readme files within feature sets, for example.
 *Show informations*
   * The user can show informations about the gitea instance and the repository with `rustea info`
   * The user can list all feature-sets in the repository with `rustea list`
+  * The user can list all script and config files of a feature set with `rustea list <name>`
 
 *Add a new feature set*
-  * The user creates a new feature set with `rustea new <name for the feature set>`
-  * This creates a new folder in the devops repository
+  * The user creates a new feature set with `rustea new <feature set name>`
+  * This creates a new folder in the devops repository with `<name>/.gitkeep`
+  
+*Delete a feature set*
+  * The user can delete a feature set with `rustea delete <feature set name>`
+  * This deletes the folder `<name>/` and everything below, be carefull.
 
+*Delete a config file from a feature set*
+  * The user can delete files or folders from a feature set with `rustea delete <fs-name> <path>`
+  * Use `-r` for recursive deletes
+  * The files or folders are only deleted within the remote repository
+
+*Delete a script file from a feature set*
+  * The user can delete a script file from a feature set with `rustea delete --script <fs-name> <script-name>`
+
+*Add scripts to a feature set*
+  * The user adds script files to a feature set with `rustea push --script <fs-name> <path to file or folder>`
+  * `rustea` either takes the file and uploads it to `<fs-name>/scripts/<filename>` or if given a folder `rustea` uploads all files inside to `<fs-name>/scripts/`
+
+*Add config files to a feature set*
+  * The user adds configuration files to a feature set with `rustea push <fs-name> <path to file or folder>`
+  * A config file is stored under `<fs-name>/path/to/config-file`
+  * All files in a config folder are stored under `<fs-name>/path/to/folder/`
+  * The absolute path of a file is determined
+
+*Update the configuration files*
+  * The user may change local configuration files and want to upload the changes
+  * The user pushes all configuration files with `rustea push <fs-name>`
+  * The needed configuration files are determined from the remote repository path 
+  * Script files are searched in `/usr/local/bin/`, if the file is located somewhere else use `rustea push --script ...`
 
 *Deploy a feature set to the machine*
-  * The user deploys a feature set with `rustea pull`
-      * For only deploying script files use `rustea pull --script`
-      * For only deploying configuration files use `rustea pull --config`
-  * `rustea` fetches the content of the feature set 
+  * The user deploys a feature set with `rustea pull <fs-name>`
+      * For only deploying script files use `rustea pull --script <fs-name>`
+      * For only deploying configuration files use `rustea pull --config <fs-name>`
+  * `rustea` fetches the content of the feature set and copies script files to `/usr/local/bin` 
+    and configration files to their repository path name without the feature set name
+  * Local copies are overwritten
+  * Sudo is required if the files are copied into filesystem regions where the user has no rights
 
 ## Goals
 
