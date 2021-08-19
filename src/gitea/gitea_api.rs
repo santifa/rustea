@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{fmt::Display, io};
+use std::fmt::Display;
 
 use serde_derive::Deserialize;
 use serde_json::Value;

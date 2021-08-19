@@ -9,7 +9,7 @@ extern crate toml;
 
 use clap::App;
 use rustea::Configuration;
-use std::process::exit;
+use std::{error::Error, process::exit};
 
 // Create the rustea cli
 fn app() -> App<'static, 'static> {
@@ -61,21 +61,37 @@ fn main() {
     // Print either the default configuration or from the file provided.
     // This is just for convience.
     if matches.is_present("PRINT") {
-        let code = Configuration::print_configuration(matches.value_of("CONFIG"));
-        exit(code);
+        let conf = Configuration::read_config_file(matches.value_of("CONFIG"));
+        match conf {
+            Ok(c) => {
+                println!("{}", c);
+                exit(0)
+            }
+            Err(e) => {
+                eprintln!("Configuration file not found. Run rustea init --token rustea-devops <repository name> <owner>\nError: {}", e);
+                exit(1)
+            }
+        }
     }
 
     // We shall evaluate this subcommand before loading the configuration file
     if let Some(sub) = matches.subcommand_matches("init") {
-        // Create a new configuration file and initialize the api and repository
-        Configuration::create_initial_configuration(
+        match Configuration::create_initial_configuration(
             &sub.value_of("URL").unwrap(),
             sub.value_of("API_TOKEN"),
             sub.value_of("TOKEN_NAME"),
             &sub.value_of("REPOSITORY").unwrap(),
             &sub.value_of("OWNER").unwrap(),
-        );
-        exit(0);
+        ) {
+            Ok(p) => {
+                println!("Configuration successfully created under {}", p.display());
+                exit(0)
+            }
+            Err(e) => {
+                eprintln!("Failed to create configuration with {}", e);
+                exit(1)
+            }
+        }
     }
 
     // Now we can safely load the configuration file
@@ -89,20 +105,27 @@ fn main() {
 
     // Check which subcommand was used
     match matches.subcommand_name() {
-        Some("info") => {
-            conf.repo.info();
-        }
+        Some("info") => match conf.repo.info() {
+            Ok(_) => todo!(),
+            Err(_) => todo!(),
+        },
         Some("list") => {
             let sub = matches.subcommand_matches("list").unwrap();
-            conf.repo.list(sub.value_of("FEATURE"));
+            match conf.repo.list(sub.value_of("FEATURE")) {
+                Ok(_) => todo!(),
+                Err(_) => todo!(),
+            }
         }
         Some("new") => {
             let sub = matches.subcommand_matches("new").unwrap();
-            conf.repo.new_feature_set(sub.value_of("NAME").unwrap());
+            match conf.repo.new_feature_set(sub.value_of("NAME").unwrap()) {
+                Ok(_) => todo!(),
+                Err(_) => todo!(),
+            }
         }
         Some("delete") => {
             let sub = matches.subcommand_matches("delete").unwrap();
-            conf.repo.delete_remote(
+            conf.repo.delete(
                 sub.value_of("NAME").unwrap(),
                 sub.value_of("PATH"),
                 sub.is_present("SCRIPT"),
@@ -111,24 +134,38 @@ fn main() {
         }
         Some("pull") => {
             let sub = matches.subcommand_matches("pull").unwrap();
-            conf.repo.pull(
+            match conf.repo.pull(
                 sub.value_of("NAME").unwrap(),
                 &conf.script_folder,
                 sub.is_present("SCRIPT"),
                 sub.is_present("CONFIG"),
-            );
+            ) {
+                Ok(_) => println!(
+                    "Successully pulled files from feature set {}",
+                    sub.value_of("NAME").unwrap()
+                ),
+                Err(e) => eprintln!(
+                    "Failed to pull files from feature set {}. Cause {}",
+                    sub.value_of("NAME").unwrap(),
+                    e
+                ),
+            }
         }
         Some("push") => {
             let sub = matches.subcommand_matches("push").unwrap();
-            conf.repo.push(
+            match conf.repo.push(
                 sub.value_of("NAME").unwrap(),
+                &conf.script_folder,
                 sub.value_of("PATH"),
                 sub.is_present("SCRIPT"),
-            );
+            ) {
+                Ok(_) => todo!(),
+                Err(_) => todo!(),
+            }
         }
         _ => {
             // We have no valid subcommand, but normaly clap checks this case
-            println!("Subcommand not found.");
+            println!("Subcommand not found.\n{}", matches.usage());
             exit(1);
         }
     }
