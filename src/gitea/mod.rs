@@ -68,8 +68,8 @@ impl GiteaClient {
         url: &str,
         api_token: Option<&str>,
         token_name: Option<&str>,
-        username: &str,
         repository: &str,
+        owner: &str,
     ) -> ApiResult<GiteaClient> {
         match api_token {
             // Use the existing token for creation
@@ -77,11 +77,15 @@ impl GiteaClient {
                 url: url.into(),
                 api_token: token.to_string(),
                 repository: repository.into(),
-                username: username.into(),
+                username: owner.into(),
                 client: GiteaClient::create_api_client(token)?,
             }),
             // Create a new api token and client configuration
             None => {
+                println!(
+                    "Requesting new topen with name {}",
+                    token_name.unwrap_or("rustea-devops")
+                );
                 let token = GiteaClient::create_new_api_token(&url, token_name)?;
                 println!("{}", token);
 
@@ -89,7 +93,7 @@ impl GiteaClient {
                     url: url.into(),
                     api_token: token.sha1.clone(),
                     repository: repository.into(),
-                    username: username.into(),
+                    username: owner.into(),
                     client: GiteaClient::create_api_client(&token.sha1)?,
                 };
                 println!("Testing connection to gitea...");
@@ -291,10 +295,6 @@ impl GiteaClient {
         Ok(())
     }
 
-    // pub fn download(&self, url: &str) -> ApiResult<String> {
-    //     Ok(self.client.get(url).send()?.error_for_status()?.text()?)
-    // }
-
     pub fn download_file(&self, name: &str) -> ApiResult<String> {
         let content = self.get_file(name)?;
         Ok(self
@@ -307,57 +307,6 @@ impl GiteaClient {
             .error_for_status()?
             .text()?)
     }
-
-    // This function queries the remote repository root and
-    // returns a list of `ContentEntry` with `ContentType::Dir`.
-    // All directories in the root are considered as feature sets.
-    // pub fn get_repository_features(&self) -> ApiResult<ContentsResponse> {
-    //     self.get_file_or_folder("", Some(ContentType::Dir))
-    // }
-
-    // /// This function returns true if a certain folder in the remote repository
-    // /// root is found.
-    // pub fn check_feature_set_exists(&self, name: &str) -> ApiResult<bool> {
-    //     let content = self.get_repository_features()?.content;
-    //     for e in content {
-    //         if e.name == name {
-    //             return Ok(true);
-    //         }
-    //     }
-    //     Ok(false)
-    // }
-
-    // This function creates a new feature set within the remote repositories root.
-    // Since git ignores empty folders, a standard way is used. The file empty
-    // `<featurename>/.gitkeep` is created instead.
-    // If the feature already exists nothing is returned and indicates success,
-    // Normaly the API returns the content entry for the created file but this is
-    // useless in this case. We only check the HTTP return code.
-    // pub fn create_new_feature_set(&self, feature_name: &str) -> ApiResult<()> {
-    //     if self.check_feature_set_exists(feature_name)? {
-    //         Ok(())
-    //     } else {
-    //         self.create_file(feature_name, ".gitkeep", "")?;
-    //         self.create_file(feature_name, "scripts/.gitkeep", "")
-    //     }
-    // }
-
-    // pub fn delete_feature_set(&self, name: &str) -> ApiResult<()> {
-    //     self.delete_file_or_folder(name, true)
-    // }
-
-    // pub fn delete_conf_from_feature_set(
-    //     &self,
-    //     name: &str,
-    //     path: &str,
-    //     recursive: bool,
-    // ) -> ApiResult<()> {
-    //     self.delete_file_or_folder(&format!("{}/{}", name, path), recursive)
-    // }
-
-    // pub fn delete_script_from_feature_set(&self, name: &str, script_name: &str) -> ApiResult<()> {
-    //     self.delete_file_or_folder(&format!("{}/scripts/{}", name, script_name), false)
-    // }
 }
 
 /// Read user input from the commandline.

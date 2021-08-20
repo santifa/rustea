@@ -41,11 +41,13 @@ pub type ApiResult<T> = std::result::Result<T, ApiError>;
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ApiError::Reqwest(_) => write!(f, "Reqwest"),
-            ApiError::Json(_) => write!(f, "Json"),
-            ApiError::BadApiToken(_) => write!(f, "Api"),
-            ApiError::InvalidCredentials(_) => write!(f, "Credentials"),
-            ApiError::InvalidContentResponse(_) => write!(f, "Content response"),
+            ApiError::Reqwest(e) => write!(f, "Failed to make a request. Cause: {}", e),
+            ApiError::Json(e) => write!(f, "Failed to parse json. Cause {}", e),
+            ApiError::BadApiToken(e) => write!(f, "Bad api token used."),
+            ApiError::InvalidCredentials(e) => write!(f, "Invalid credentials used."),
+            ApiError::InvalidContentResponse(e) => {
+                write!(f, "Invalid content response from server.")
+            }
         }
     }
 }

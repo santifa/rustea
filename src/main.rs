@@ -9,7 +9,7 @@ extern crate toml;
 
 use clap::App;
 use rustea::Configuration;
-use std::{error::Error, process::exit};
+use std::process::exit;
 
 // Create the rustea cli
 fn app() -> App<'static, 'static> {
@@ -22,7 +22,7 @@ fn app() -> App<'static, 'static> {
              (@arg PRINT: -p --print "Print current configuration")
             (@subcommand init =>
              (about: "Create a new configuration for rustea.")
-             (@arg URL: +required "The base url to the gitea instance")
+             (@arg URL: +required "The base url to the gitea instance without the trailing slash.")
              (@arg REPOSITORY: +required "The repository name")
              (@arg OWNER: +required "The repository owner")
              (@arg API_TOKEN: --token +takes_value "Provide the api token for gitea")
@@ -84,11 +84,14 @@ fn main() {
             &sub.value_of("OWNER").unwrap(),
         ) {
             Ok(p) => {
-                println!("Configuration successfully created under {}", p.display());
+                println!(
+                    "Successfully initialized rustea. Configuration path {}",
+                    p.display()
+                );
                 exit(0)
             }
             Err(e) => {
-                eprintln!("Failed to create configuration with {}", e);
+                eprintln!("Failed to initialize rustea.\nCause: {}", e);
                 exit(1)
             }
         }
@@ -125,12 +128,24 @@ fn main() {
         }
         Some("delete") => {
             let sub = matches.subcommand_matches("delete").unwrap();
-            conf.repo.delete(
+            match conf.repo.delete(
                 sub.value_of("NAME").unwrap(),
                 sub.value_of("PATH"),
                 sub.is_present("SCRIPT"),
                 sub.is_present("RECURSIVE"),
-            );
+            ) {
+                Ok(_) => println!(
+                    "Successfully deleted {} from the feature set {}",
+                    sub.value_of("PATH").unwrap(),
+                    sub.value_of("NAME").unwrap()
+                ),
+                Err(e) => eprintln!(
+                    "Failed to delete {} from the feature set {}.\nCause: {}",
+                    sub.value_of("PATH").unwrap(),
+                    sub.value_of("NAME").unwrap(),
+                    e
+                ),
+            }
         }
         Some("pull") => {
             let sub = matches.subcommand_matches("pull").unwrap();
@@ -159,8 +174,15 @@ fn main() {
                 sub.value_of("PATH"),
                 sub.is_present("SCRIPT"),
             ) {
-                Ok(_) => todo!(),
-                Err(_) => todo!(),
+                Ok(_) => println!(
+                    "Successfully pushed files to feature set {}",
+                    sub.value_of("NAME").unwrap()
+                ),
+                Err(e) => eprintln!(
+                    "Failed to push files to feature set {}. Cause {}",
+                    sub.value_of("NAME").unwrap(),
+                    e
+                ),
             }
         }
         _ => {

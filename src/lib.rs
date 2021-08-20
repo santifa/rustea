@@ -301,33 +301,38 @@ impl RemoteRepository {
         .map_err(Error::ApiError)
     }
 
-    // fn push_files(
-    //     api: &GiteaClient,
-    //     feature_set: &str,
-    //     files: Vec<PathBuf>,
-    //     script: bool,
-    // ) -> Vec<String> {
-    //     let mut results = vec![];
-    //     for file in files {
-    //         if file.exists() {
-    //             let remote_path = to_remote_path(&file, script)?;
-    //             let content = read_file(&file)?;
-    //             match api.create_or_update_file(feature_set, &remote_path, &content) {
-    //                 Ok(()) => results.push(format!(
-    //                     "Successfully uploaded file {} into feature set {}.",
-    //                     remote_path, feature_set
-    //                 )),
-    //                 Err(c) => results.push(format!(
-    //                     "Failed to upload file {} int feature set {} with cause {}",
-    //                     remote_path, feature_set, c
-    //                 )),
-    //             }
-    //         }
-    //     }
-    //     results
-    // }
+    /// This function pushes files located in a `path` to the feature set in the remote repository.
+    ///
+    /// It distinguishes between script files and configuration files through the `script`
+    /// argument. The existence of the `path` should be validated beforehand.
+    fn push_files(
+        &self,
+        api: &GiteaClient,
+        path: &PathBuf,
+        // files: &[PathBuf],
+        feature_set: &str,
+        script: bool,
+    ) -> Result<()> {
+        let files = read_folder(&path)?;
+        for file in files {
+            let remote_path = to_remote_path(&file, script)?;
+            let content = read_file(&file)?;
+            api.create_or_update_file(
+                feature_set,
+                &remote_path,
+                &content,
+                &self.author,
+                &self.email,
+            )?;
+            println!(
+                "Pushed file {} into feature set {}",
+                remote_path, feature_set
+            );
+        }
+        Ok(())
+    }
 
-    /// This function pushes files to a feature set.
+    /// This function pushes files a feature set in the remote repository.
     ///
     /// If no path is provided this function fetches all files stored
     /// in the remote repository and tries to push a local version if found.
@@ -351,23 +356,7 @@ impl RemoteRepository {
             // Push a config or script file or folder
             let path = PathBuf::from(path).canonicalize()?;
             if path.exists() {
-                let files = read_folder(&path)?;
-
-                for entry in files {
-                    let remote_path = to_remote_path(&entry, script)?;
-                    let content = read_file(&entry)?;
-                    let res = api.create_or_update_file(
-                        name,
-                        &remote_path,
-                        &content,
-                        &self.author,
-                        &self.email,
-                    );
-                    println!(
-                        "Uploaded file {} into feature set {} with result {:#?}",
-                        remote_path, name, res
-                    );
-                }
+                self.push_files(&api, &path, name, script)?;
             } else {
                 return Err(Error::Push(format!(
                     "File {} doesn't exists",
@@ -380,58 +369,24 @@ impl RemoteRepository {
             let script_remote = format!("{}/scripts/", name);
 
             for entry in feature_set.content {
-                let mut path = entry.path.clone();
-                if path.starts_with(&script_remote) {
-                    // get the script file names and upload them from the script folder
-                    let file_name = path.strip_prefix(&script_remote).unwrap();
-                    let mut file_path = PathBuf::from(script_dir);
-                    file_path.push(file_name);
-                    if file_path.exists() {
-                        let content = read_file(&file_path)?;
-                        let remote_path = to_remote_path(&file_path, true)?;
-                        let res = api.create_or_update_file(
-                            name,
-                            &remote_path,
-                            &content,
-                            &self.author,
-                            &self.email,
-                        );
-                        println!(
-                            "Uploaded file {} into feature set {} with result {:#?}",
-                            remote_path, name, res
-                        );
-                    }
-                } else {
-                    // we have a configuration file, so strip feature set and
-                    // push file if the path exists, ignore otherwise
-                    let file_path = PathBuf::from(path.strip_prefix(&name).unwrap());
-                    if file_path.exists() {
-                        let content = read_file(&file_path)?;
-                        let remote_path = to_remote_path(&file_path, false)?;
-                        let res = api.create_or_update_file(
-                            name,
-                            &remote_path,
-                            &content,
-                            &self.author,
-                            &self.email,
-                        );
-                        println!(
-                            "Uploaded file {} into feature set {} with result {:#?}",
-                            remote_path, name, res
-                        );
-                    }
+                let script = entry.path.starts_with(&script_remote);
+                let file_path = to_local_path(&entry.path, script, script_dir)?;
+                if file_path.exists() {
+                    self.push_files(&api, &file_path, name, script)?;
                 }
             }
         }
         Ok(())
     }
 
-    /// This function pulls the script file folder from the remote repository.
+    /// This function pulls files from the remote repository.
     ///
-    /// It takes the feature set and pulls a found files into the defined local
-    /// script directory. It returns an Error if some IO error happens or the
-    /// script folder is not writable for the current user.
-    fn pull_script_files(
+    /// It takes a vector of `ContentEntry` converts the path to a local one
+    /// depending on the `script` argument. Afterwards, if the path is writable
+    /// the files are pulled from the remote repository and gets written to the
+    /// local destination. It returns an error if some IO failure happens or
+    /// the destination is not writable for the current user.
+    fn pull_files(
         &self,
         api: &GiteaClient,
         files: &[ContentEntry],
@@ -452,72 +407,41 @@ impl RemoteRepository {
         Ok(())
     }
 
+    /// This function pulls files from the remote repository and stores them
+    /// on the local machine depending on the remote path.
+    ///
+    /// For the provided feature set either the script files or configuration files
+    /// are pulled depending on the `script` and `config` argument. If both are set
+    /// to true only script files are pulled to the local machine.
+    /// If both arguments are set to false everything if pulled from the feature set.
     pub fn pull(&self, name: &str, script_dir: &str, script: bool, config: bool) -> Result<()> {
         let api = self.create_api_client()?;
         if !self.check_feature_set_exists(&api, name)? {
             return Err(Error::Push(format!("No features set named {}", name)));
         }
+        check_folder(script_dir)?;
         let prefix = format!("{}/scripts", name);
         let feature_set = api.get_folder(name)?;
 
-        if script {
-            // Pull only the script files
-            check_folder(script_dir)?;
+        if script || config {
             let files = feature_set
                 .content
                 .into_iter()
-                .filter(|e| e.path.starts_with(&prefix))
+                .filter(|e| {
+                    if script {
+                        e.path.starts_with(&prefix)
+                    } else {
+                        // We do not distinguish further between the cases
+                        !e.path.starts_with(&prefix)
+                    }
+                })
                 .collect::<Vec<ContentEntry>>();
-            // let script_files = api.get_folder(&format!("{}/scripts", feature_set))?;
-            self.pull_script_files(&api, &files, true, script_dir)?;
-        } else if config {
-            // Pull only the config files
-            let files = feature_set
-                .content
-                .into_iter()
-                .filter(|e| !e.path.starts_with(&prefix))
-                .collect::<Vec<ContentEntry>>();
-            self.pull_script_files(&api, &files, false, script_dir)?;
-            // for file in feature_set.content {
-            // for file in files {
-            // if !file.path.starts_with(&format!("{}/scripts", name)) {
-            // let content = api.download_file(&file.path)?;
-            // let path = PathBuf::from(&file.path.strip_prefix(name).unwrap());
-
-            // if !path.parent().unwrap().writable() {
-            //     println!("Path {} is not writable", path.display());
-            // } else {
-            //     let mut f = File::create(&path)?;
-            //     match f.write_all(content.as_bytes()) {
-            //         Ok(_) => println!("File {} written", path.display()),
-            //         Err(e) => println!("Failed with {}", e),
-            //     }
-            //     // }
-            // }
-            // }
+            self.pull_files(&api, &files, script, script_dir)?;
         } else {
             // Pull everything found in the feature set
-            check_folder(script_dir)?;
             for file in feature_set.content {
-                if !file.path.starts_with(&format!("{}/scripts", name)) {
-                    self.pull_script_files(&api, &[file], false, script_dir)?;
-                    // let content = api.download_file(&file.path)?;
-                    // let path = PathBuf::from(&file.path.strip_prefix(name).unwrap());
-
-                    // if !path.parent().unwrap().writable() {
-                    //     println!("Path {} is not writable", path.display());
-                    // } else {
-                    //     let mut f = File::create(&path)?;
-                    //     match f.write_all(content.as_bytes()) {
-                    //         Ok(_) => println!("File {} written", path.display()),
-                    //         Err(e) => println!("Failed with {}", e),
-                    //     }
-                    // }
-                } else {
-                    // let script_files = api.get_folder(&format!("{}/scripts", feature_set))?;
-                    self.pull_script_files(&api, &[file], true, script_dir)?;
-                    // self.pull_script_files(&api, name, script_dir)?;
-                }
+                let script = file.path.starts_with(&prefix);
+                self.pull_files(&api, &[file], script, script_dir)?;
             }
         }
         Ok(())
