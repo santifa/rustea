@@ -1,5 +1,20 @@
+/// rustea is a small cli tool to interact with git repositories hosted
+/// by Gitea Instances. Copyright (C) 2021  Henrik Jürges (juerges.henrik@gmail.com)
+///
+/// This program is free software: you can redistribute it and/or modify
+/// it under the terms of the GNU General Public License as published by
+/// the Free Software Foundation, either version 3 of the License, or
+/// (at your option) any later version.
+///
+/// This program is distributed in the hope that it will be useful,
+/// but WITHOUT ANY WARRANTY; without even the implied warranty of
+/// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+/// GNU General Public License for more details.
+///
+/// You should have received a copy of the GNU General Public License
+/// along with this program. If not, see <https://www.gnu.org/licenses/>.
 use core::fmt;
-use std::fmt::Display;
+use std::{fmt::Display, io};
 
 use serde_derive::Deserialize;
 use serde_json::Value;
@@ -7,9 +22,10 @@ use serde_json::Value;
 /// All possible errors which can happen by using the gitea api.
 #[derive(Debug)]
 pub enum ApiError {
-    Reqwest(reqwest::Error),
+    Io(io::Error),
+    // Reqwest(reqwest::Error),
+    Ureq(ureq::Error),
     Json(serde_json::Error),
-    BadApiToken(reqwest::header::InvalidHeaderValue),
     InvalidCredentials(String),
     InvalidContentResponse(String),
 }
@@ -17,21 +33,21 @@ pub enum ApiError {
 impl std::error::Error for ApiError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match *self {
-            ApiError::Reqwest(ref c) => Some(c),
+            ApiError::Ureq(ref c) => Some(c),
             ApiError::Json(ref c) => Some(c),
-            ApiError::BadApiToken(ref c) => Some(c),
             ApiError::InvalidCredentials(_) => None,
             ApiError::InvalidContentResponse(_) => None,
+            ApiError::Io(_) => todo!(),
         }
     }
 
     fn cause(&self) -> Option<&dyn std::error::Error> {
         match *self {
-            ApiError::Reqwest(ref c) => Some(c),
+            ApiError::Ureq(ref c) => Some(c),
             ApiError::Json(ref c) => Some(c),
-            ApiError::BadApiToken(ref c) => Some(c),
             ApiError::InvalidCredentials(_) => None,
             ApiError::InvalidContentResponse(_) => None,
+            ApiError::Io(_) => todo!(),
         }
     }
 }
@@ -41,26 +57,26 @@ pub type ApiResult<T> = std::result::Result<T, ApiError>;
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ApiError::Reqwest(e) => write!(f, "Failed to make a request. Cause: {}", e),
+            ApiError::Ureq(e) => write!(f, "Failed to make a request. Cause: {}", e),
             ApiError::Json(e) => write!(f, "Failed to parse json. Cause {}", e),
-            ApiError::BadApiToken(e) => write!(f, "Bad api token used."),
-            ApiError::InvalidCredentials(e) => write!(f, "Invalid credentials used."),
+            ApiError::InvalidCredentials(e) => write!(f, "Invalid credentials used. Cause: {}", e),
             ApiError::InvalidContentResponse(e) => {
-                write!(f, "Invalid content response from server.")
+                write!(f, "Invalid content response from server. Cause: {}", e)
             }
+            ApiError::Io(e) => write!(f, "IO Error: {}", e),
         }
     }
 }
 
-impl From<reqwest::Error> for ApiError {
-    fn from(err: reqwest::Error) -> Self {
-        ApiError::Reqwest(err)
+impl From<io::Error> for ApiError {
+    fn from(err: io::Error) -> Self {
+        ApiError::Io(err)
     }
 }
 
-impl From<reqwest::header::InvalidHeaderValue> for ApiError {
-    fn from(err: reqwest::header::InvalidHeaderValue) -> Self {
-        ApiError::BadApiToken(err)
+impl From<ureq::Error> for ApiError {
+    fn from(err: ureq::Error) -> Self {
+        ApiError::Ureq(err)
     }
 }
 

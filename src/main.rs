@@ -1,11 +1,26 @@
+/// rustea is a small cli tool to interact with git repositories hosted
+/// by Gitea Instances. Copyright (C) 2021  Henrik Jürges (juerges.henrik@gmail.com)
+///
+/// This program is free software: you can redistribute it and/or modify
+/// it under the terms of the GNU General Public License as published by
+/// the Free Software Foundation, either version 3 of the License, or
+/// (at your option) any later version.
+///
+/// This program is distributed in the hope that it will be useful,
+/// but WITHOUT ANY WARRANTY; without even the implied warranty of
+/// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+/// GNU General Public License for more details.
+///
+/// You should have received a copy of the GNU General Public License
+/// along with this program. If not, see <https://www.gnu.org/licenses/>.
 #[macro_use]
 extern crate clap;
 extern crate base64;
 extern crate faccess;
-extern crate reqwest;
 extern crate serde;
 extern crate serde_json;
 extern crate toml;
+extern crate ureq;
 
 use clap::App;
 use rustea::Configuration;
@@ -109,21 +124,21 @@ fn main() {
     // Check which subcommand was used
     match matches.subcommand_name() {
         Some("info") => match conf.repo.info() {
-            Ok(_) => todo!(),
-            Err(_) => todo!(),
+            Ok(_) => exit(0),
+            Err(e) => println!("Can not fetch informations. Cause: {}", e),
         },
         Some("list") => {
             let sub = matches.subcommand_matches("list").unwrap();
             match conf.repo.list(sub.value_of("FEATURE")) {
-                Ok(_) => todo!(),
-                Err(_) => todo!(),
+                Ok(_) => exit(0),
+                Err(e) => println!("Can not fetch informations. Cause: {}", e),
             }
         }
         Some("new") => {
             let sub = matches.subcommand_matches("new").unwrap();
             match conf.repo.new_feature_set(sub.value_of("NAME").unwrap()) {
-                Ok(_) => todo!(),
-                Err(_) => todo!(),
+                Ok(_) => exit(0),
+                Err(e) => println!("Can not fetch informations. Cause: {}", e),
             }
         }
         Some("delete") => {

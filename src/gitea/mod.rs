@@ -1,9 +1,23 @@
+/// rustea is a small cli tool to interact with git repositories hosted
+/// by Gitea Instances. Copyright (C) 2021  Henrik Jürges (juerges.henrik@gmail.com)
+///
+/// This program is free software: you can redistribute it and/or modify
+/// it under the terms of the GNU General Public License as published by
+/// the Free Software Foundation, either version 3 of the License, or
+/// (at your option) any later version.
+///
+/// This program is distributed in the hope that it will be useful,
+/// but WITHOUT ANY WARRANTY; without even the implied warranty of
+/// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+/// GNU General Public License for more details.
+///
+/// You should have received a copy of the GNU General Public License
+/// along with this program. If not, see <https://www.gnu.org/licenses/>.
 pub mod gitea_api;
 
 use base64::encode;
-use reqwest::{blocking::Client, header};
-use serde_json::{json, Value};
 use std::io::Write;
+use ureq::{Agent, AgentBuilder};
 
 use gitea_api::{ApiError, ApiResult, ApiToken, ContentsResponse, Repository, Version};
 
@@ -16,27 +30,16 @@ pub struct GiteaClient {
     pub url: String,
     pub api_token: String,
     pub repository: String,
-    pub username: String,
-    client: Client,
+    pub owner: String,
+    client: Agent,
 }
 
 impl GiteaClient {
     /// Construct a new http client.
     /// Since this is a cli tool the client is blocking
     /// and calls to the API are made order.
-    fn create_api_client(api_token: &str) -> ApiResult<Client> {
-        let mut headers = header::HeaderMap::new();
-        let auth = format!("token {}", api_token);
-        let auth = auth.as_str();
-        headers.insert(
-            header::AUTHORIZATION,
-            header::HeaderValue::from_str(auth).unwrap(),
-        );
-        Client::builder()
-            .user_agent("rustea")
-            .default_headers(headers)
-            .build()
-            .map_err(ApiError::Reqwest)
+    fn create_api_client(_api_token: &str) -> Agent {
+        AgentBuilder::new().user_agent("rustea").build()
     }
 
     /// This functions requests a new Gitea API token if no one is provided.
@@ -46,18 +49,16 @@ impl GiteaClient {
         println!("Requesting a new api token.");
         let username = read_from_cli("Username");
         let password = read_from_cli("Password");
+        let auth = base64::encode(format!("{}:{}", username, password).as_bytes());
 
-        Client::new()
-            .post(format!("{}/api/v1/users/{}/tokens", url, username))
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(format!(
-                "{{\"name\" : \"{}\"}}",
-                token_name.unwrap_or("rustea-devops")
-            ))
-            .basic_auth(username.trim(), Some(password.trim()))
-            .send()?
-            .json::<ApiToken>()
-            .map_err(ApiError::Reqwest)
+        let agent = AgentBuilder::new().user_agent("rustea").build();
+        agent
+            .post(&format!("{}/api/v1/users/{}/tokens", url, username))
+            .set("Authorization", &format!("Basic {}", auth))
+            .set("content-type", "application/json")
+            .send_json(ureq::json!({"name": token_name.unwrap_or("rustea-devops")}))?
+            .into_json::<ApiToken>()
+            .map_err(ApiError::Io)
     }
 
     /// This creates a new default Gite API client
@@ -77,8 +78,8 @@ impl GiteaClient {
                 url: url.into(),
                 api_token: token.to_string(),
                 repository: repository.into(),
-                username: owner.into(),
-                client: GiteaClient::create_api_client(token)?,
+                owner: owner.into(),
+                client: GiteaClient::create_api_client(token),
             }),
             // Create a new api token and client configuration
             None => {
@@ -93,8 +94,8 @@ impl GiteaClient {
                     url: url.into(),
                     api_token: token.sha1.clone(),
                     repository: repository.into(),
-                    username: owner.into(),
-                    client: GiteaClient::create_api_client(&token.sha1)?,
+                    owner: owner.into(),
+                    client: GiteaClient::create_api_client(&token.sha1),
                 };
                 println!("Testing connection to gitea...");
                 let gitea_version = client.get_gitea_version()?;
@@ -107,29 +108,29 @@ impl GiteaClient {
 
     /// Returns the Gitea version of the remote instance used by rustea.
     pub fn get_gitea_version(&self) -> ApiResult<Version> {
+        // todo!()
         self.client
-            .get(format!("{}{}/version", self.url, API_PART))
-            .send()?
-            .error_for_status()?
-            .json()
-            .map_err(ApiError::Reqwest)
+            .get(&format!("{}{}/version", self.url, API_PART))
+            .set("Authorization", &format!("token {}", self.api_token))
+            .call()?
+            .into_json()
+            .map_err(ApiError::Io)
     }
 
     /// Returns informations about the remote repository used by rustea.
     pub fn get_repository_information(&self) -> ApiResult<Repository> {
         self.client
-            .get(format!(
+            .get(&format!(
                 "{}{}/repos/{}/{}",
-                self.url, API_PART, self.username, self.repository
+                self.url, API_PART, self.owner, self.repository
             ))
-            .send()?
-            .error_for_status()?
-            .json()
-            .map_err(ApiError::Reqwest)
+            .set("Authorization", &format!("token {}", self.api_token))
+            .call()?
+            .into_json()
+            .map_err(ApiError::Io)
     }
 
-    /// Returns a `Vec` of `ContentEntry` which represents either a folder or
-    /// file.
+    /// Returns a `Vec` of `ContentEntry` which represents either a folder or file.
     pub fn get_file_or_folder(
         &self,
         name: &str,
@@ -137,13 +138,14 @@ impl GiteaClient {
     ) -> ApiResult<ContentsResponse> {
         let res = self
             .client
-            .get(format!(
+            .get(&format!(
                 "{}{}/repos/{}/{}/contents/{}",
-                self.url, API_PART, self.username, self.repository, name
+                self.url, API_PART, self.owner, self.repository, name
             ))
-            .send()?
-            .error_for_status()?
-            .json::<Value>()?;
+            .set("Authorization", &format!("token {}", self.api_token))
+            .call()?
+            .into_json()
+            .map_err(ApiError::Io)?;
         Ok(ContentsResponse::new(res, filter_type)?)
     }
 
@@ -199,20 +201,17 @@ impl GiteaClient {
         content: &str,
         author: &str,
         mail: &str,
-    ) -> ApiResult<()> {
+    ) -> ApiResult<String> {
         self.client
-            .post(format!(
+            .post(&format!(
                 "{}{}/repos/{}/{}/contents/{}{}",
-                self.url, API_PART, self.username, self.repository, feature_name, filename
+                      self.url, API_PART, self.owner, self.repository, feature_name, filename
             ))
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(
-                json!({"author": { "email": mail, "name": author}, "content": encode(content) })
-                    .to_string(),
-            )
-            .send()?
-            .error_for_status()?;
-        Ok(())
+            .set("Authorization", &format!("token {}", self.api_token))
+            .set("content-type", "application/json")
+            .send_json(ureq::json!({"author": { "email": mail, "name": author}, "content": encode(content) }))?
+            .into_string()
+            .map_err(ApiError::Io)
     }
 
     /// This function checks wether a file exists under the feature set and either uploads
@@ -224,25 +223,21 @@ impl GiteaClient {
         content: &str,
         author: &str,
         mail: &str,
-    ) -> ApiResult<()> {
+    ) -> ApiResult<String> {
         if self.check_file_exists(feature_name, filename) {
             let files = self.get_file_or_folder(&format!("{}{}", feature_name, filename), None)?;
             let file_sha = files.content[0].sha.as_ref().unwrap();
 
             self.client
-                .put(format!(
+                .put(&format!(
                     "{}{}/repos/{}/{}/contents/{}{}",
-                    self.url, API_PART, self.username, self.repository, feature_name, filename
+                    self.url, API_PART, self.owner, self.repository, feature_name, filename
                 ))
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .body(
-                    json!({"author": { "email": mail, "name": author},
-                       "content": encode(content), "sha": file_sha })
-                    .to_string(),
-                )
-                .send()?
-                .error_for_status()?;
-            Ok(())
+                .set("Authorization", &format!("token {}", self.api_token))
+                .set("content-type", "application/json")
+                .send_json(ureq::json!({"author": { "email": mail, "name": author}, "content": encode(content), "sha": file_sha  }))?
+                .into_string()
+                .map_err(ApiError::Io)
         } else {
             self.create_file(feature_name, filename, content, author, mail)
         }
@@ -255,17 +250,16 @@ impl GiteaClient {
         file_sha: &str,
         author: &str,
         mail: &str,
-    ) -> ApiResult<()> {
+    ) -> ApiResult<String> {
         self.client
-            .delete(format!(
+            .delete(&format!(
                 "{}{}/repos/{}/{}/contents/{}",
-                self.url, API_PART, self.username, self.repository, name
+                self.url, API_PART, self.owner, self.repository, name
             ))
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(json!({"author": { "email": mail, "name": author}, "sha": file_sha }).to_string())
-            .send()?
-            .error_for_status()?;
-        Ok(())
+            .set("Authorization", &format!("token {}", self.api_token))
+            .send_json(ureq::json!({"author": { "email": mail, "name": author}, "sha": file_sha }))?
+            .into_string()
+            .map_err(ApiError::Io)
     }
 
     /// This functions deletes either a file or the whole folder from
@@ -284,12 +278,14 @@ impl GiteaClient {
             match file.content_type {
                 ContentType::Dir => {
                     if recursive {
-                        self.delete_file_or_folder(&file.path, true, author, mail)?
+                        self.delete_file_or_folder(&file.path, true, author, mail)?;
                     } else {
-                        self.delete_file(&file.path, file.sha.as_ref().unwrap(), author, mail)?
+                        self.delete_file(&file.path, file.sha.as_ref().unwrap(), author, mail)?;
                     }
                 }
-                _ => self.delete_file(&file.path, file.sha.as_ref().unwrap(), author, mail)?,
+                _ => {
+                    self.delete_file(&file.path, file.sha.as_ref().unwrap(), author, mail)?;
+                }
             }
         }
         Ok(())
@@ -297,15 +293,15 @@ impl GiteaClient {
 
     pub fn download_file(&self, name: &str) -> ApiResult<String> {
         let content = self.get_file(name)?;
-        Ok(self
-            .client
-            .get(format!(
+        self.client
+            .get(&format!(
                 "{}{}/repos/{}/{}/raw/{}",
-                self.url, API_PART, self.username, self.repository, content.path
+                self.url, API_PART, self.owner, self.repository, content.path
             ))
-            .send()?
-            .error_for_status()?
-            .text()?)
+            .set("Authorization", &format!("token {}", self.api_token))
+            .call()?
+            .into_string()
+            .map_err(ApiError::Io)
     }
 }
 

@@ -1,6 +1,22 @@
 //! This is library part of the rustea implementation.
 //!
 //! It implements the heavy lifting for the main binary.
+
+/// rustea is a small cli tool to interact with git repositories hosted
+/// by Gitea Instances. Copyright (C) 2021  Henrik Jürges (juerges.henrik@gmail.com)
+///
+/// This program is free software: you can redistribute it and/or modify
+/// it under the terms of the GNU General Public License as published by
+/// the Free Software Foundation, either version 3 of the License, or
+/// (at your option) any later version.
+///
+/// This program is distributed in the hope that it will be useful,
+/// but WITHOUT ANY WARRANTY; without even the implied warranty of
+/// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+/// GNU General Public License for more details.
+///
+/// You should have received a copy of the GNU General Public License
+/// along with this program. If not, see <https://www.gnu.org/licenses/>.
 pub mod gitea;
 
 use core::fmt;
@@ -153,9 +169,9 @@ impl Configuration {
                 url: client.url,
                 api_token: client.api_token,
                 repository: client.repository,
-                owner: client.username.clone(),
+                owner: client.owner.clone(),
                 email: String::new(),
-                author: client.username.clone(),
+                author: client.owner.clone(),
             },
         };
 
@@ -193,8 +209,8 @@ impl RemoteRepository {
             &self.url,
             Some(&self.api_token),
             None,
-            &self.owner,
             &self.repository,
+            &self.owner,
         )
         .map_err(Error::ApiError)
     }
@@ -580,7 +596,7 @@ mod tests {
         let remote_path = to_remote_path(&path, false).unwrap();
         assert_eq!(remote_path, ".gitignore");
         let remote_path = to_remote_path(&path, true).unwrap();
-        assert_eq!(remote_path, "scripts/.gitignore");
+        assert_eq!(remote_path, "/scripts/.gitignore");
         let remote_path = to_remote_path(&PathBuf::from("/"), true);
         assert!(remote_path.is_err())
     }
