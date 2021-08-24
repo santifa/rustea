@@ -90,13 +90,20 @@ The name and email address are used for commiting.
 
 Either grab a pre-build copy:
 
+    curl -L https://github.com/santifa/rustea/releases/download/v0.1.1/rustea-min > /usr/local/bin/rustea
 
 or build `rustea` on your own:
 
     git clone https://github.com/santifa/rustea.git
     cd rustea
     cargo build --release
-    
+
+Now you can create a new repository within in your Gitea Instance. 
+__!!! Be aware that you must initialize your repository with some README.md or something else.
+An empty repository refuses to add new files via API !!!__
+
+Afterwards, you can either create the `~/.rustea.toml` by yourself or run `rustea init --name <TOKEN-NAME> <URL> <REPO> <OWNER>`.
+
 `rustea` uses some optimization for the binary size: [[Ref]](https://arusahni.net/blog/2020/03/optimizing-rust-binary-size.html), [[Ref]](https://github.com/johnthagen/min-sized-rust)
 
   * [x] build in release mode
@@ -122,6 +129,8 @@ the project root which points to an empty remote repository.
 
 A small list of features that came in my mind:
   * [ ] Commit messages from `rustea`
+  * [x] Use binary format for reading files
+  * [ ] Ignore specific files like `.git`
   * [ ] Pull single configuration or script files from a feature set
   * [ ] Provide other backends like Gitlab or Github
   * [ ] Show diff between the local and remote configuration

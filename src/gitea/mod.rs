@@ -198,18 +198,20 @@ impl GiteaClient {
         &self,
         feature_name: &str,
         filename: &str,
-        content: &str,
+        content: &[u8],
         author: &str,
         mail: &str,
     ) -> ApiResult<String> {
+        let body =
+            ureq::json!({"author": { "email": mail, "name": author}, "content": encode(content) });
         self.client
             .post(&format!(
                 "{}{}/repos/{}/{}/contents/{}{}",
-                      self.url, API_PART, self.owner, self.repository, feature_name, filename
+                self.url, API_PART, self.owner, self.repository, feature_name, filename
             ))
             .set("Authorization", &format!("token {}", self.api_token))
             .set("content-type", "application/json")
-            .send_json(ureq::json!({"author": { "email": mail, "name": author}, "content": encode(content) }))?
+            .send_json(body)?
             .into_string()
             .map_err(ApiError::Io)
     }
@@ -220,7 +222,7 @@ impl GiteaClient {
         &self,
         feature_name: &str,
         filename: &str,
-        content: &str,
+        content: &[u8],
         author: &str,
         mail: &str,
     ) -> ApiResult<String> {

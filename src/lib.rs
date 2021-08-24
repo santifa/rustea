@@ -272,11 +272,17 @@ impl RemoteRepository {
     pub fn new_feature_set(&self, feature_set: &str) -> Result<()> {
         let api = self.create_api_client()?;
         if !self.check_feature_set_exists(&api, feature_set)? {
-            api.create_or_update_file(feature_set, ".gitkeep", "", &self.author, &self.email)?;
             api.create_or_update_file(
                 feature_set,
-                "scripts/.gitkeep",
-                "",
+                "/.gitkeep",
+                "".as_bytes(),
+                &self.author,
+                &self.email,
+            )?;
+            api.create_or_update_file(
+                feature_set,
+                "/scripts/.gitkeep",
+                "".as_bytes(),
                 &self.author,
                 &self.email,
             )?;
@@ -474,11 +480,11 @@ impl Display for RemoteRepository {
     }
 }
 
-/// Read a file denoted by a `PathBuf` into a `String` or return the io Error.
-fn read_file(path: &PathBuf) -> Result<String> {
-    let mut string = String::new();
-    File::open(path.as_path()).and_then(|mut f| f.read_to_string(&mut string))?;
-    Ok(string)
+/// Read a file denoted by a `PathBuf` into a `Vec<u8>` or return the io Error.
+fn read_file(path: &PathBuf) -> Result<Vec<u8>> {
+    let mut b: Vec<u8> = Vec::with_capacity(path.metadata()?.len() as usize);
+    File::open(path.as_path()).and_then(|mut f| f.read_to_end(&mut b))?;
+    Ok(b)
 }
 
 /// This function takes a path and either returns it directly as vector if
@@ -493,8 +499,11 @@ fn read_folder(path: &PathBuf) -> Result<Vec<PathBuf>> {
             let entry = entry?;
             if entry.path().is_dir() {
                 // Recursively push folders
-                let mut entries = read_folder(&entry.path())?;
-                v.append(&mut entries);
+
+                if !entry.path().display().to_string().contains(".git") {
+                    let mut entries = read_folder(&entry.path())?;
+                    v.append(&mut entries);
+                }
             } else {
                 // Push a single file
                 v.push(entry.path().canonicalize()?)
