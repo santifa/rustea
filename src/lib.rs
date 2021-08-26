@@ -111,7 +111,7 @@ impl From<toml::de::Error> for Error {
 }
 
 /// The version of rustea
-pub const VERSION: &str = "0.1";
+pub const VERSION: &str = "0.1.3";
 
 /// The default configuration name used by rustea.
 pub const DEFAULT_CONF_NAME: &str = ".rustea.toml";
@@ -128,7 +128,7 @@ pub fn get_default_path() -> Result<String> {
 }
 
 /// The main configuration is serialized by the toml library.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct Configuration {
     pub script_folder: String,
     pub repo: RemoteRepository,
@@ -192,7 +192,7 @@ impl Display for Configuration {
 
 /// This struct defines the access to the remote repository
 /// which contains the features sets used by rustea.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct RemoteRepository {
     pub url: String,
     pub api_token: String,

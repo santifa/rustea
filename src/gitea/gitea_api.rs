@@ -86,7 +86,7 @@ impl From<serde_json::Error> for ApiError {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 pub struct ApiToken {
     pub id: i64,
     pub name: String,
@@ -105,7 +105,7 @@ impl Display for ApiToken {
 }
 
 /// The gitea version number
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 pub struct Version {
     pub version: String,
 }
@@ -116,7 +116,7 @@ impl Display for Version {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 pub struct User {
     pub id: i64,
     pub full_name: String,
@@ -147,7 +147,7 @@ impl Display for User {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 pub struct Permission {
     pub admin: bool,
     pub pull: bool,
@@ -164,7 +164,7 @@ impl Display for Permission {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
 pub struct Repository {
     pub empty: bool,
     pub id: i64,
@@ -209,6 +209,12 @@ impl ContentType {
     }
 }
 
+impl Default for ContentType {
+    fn default() -> Self {
+        ContentType::File
+    }
+}
+
 impl Display for ContentType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -220,7 +226,7 @@ impl Display for ContentType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ContentEntry {
     pub download_url: Option<String>,
     pub name: String,

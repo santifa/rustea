@@ -16,7 +16,7 @@
 pub mod gitea_api;
 
 use base64::encode;
-use std::io::Write;
+use std::{borrow::Cow, io::Write};
 use ureq::{Agent, AgentBuilder};
 
 use gitea_api::{ApiError, ApiResult, ApiToken, ContentsResponse, Repository, Version};
@@ -32,6 +32,18 @@ pub struct GiteaClient {
     pub repository: String,
     pub owner: String,
     client: Agent,
+}
+
+impl Default for GiteaClient {
+    fn default() -> Self {
+        GiteaClient {
+            url: String::with_capacity(0),
+            api_token: String::with_capacity(0),
+            repository: String::with_capacity(0),
+            owner: String::with_capacity(0),
+            client: ureq::agent(),
+        }
+    }
 }
 
 impl GiteaClient {

@@ -30,7 +30,7 @@ use std::process::exit;
 fn app() -> App<'static, 'static> {
     clap_app!(
         rustea =>
-            (version: "0.1.2")
+            (version: "0.1.3")
             (author: "Henrik Jürges <juerges.henrik@gmail.com")
             (about: "A small utility for fetching configurations from gitea.")
             (@arg CONFIG: -c --config +takes_value "Set a custom configuration file")
