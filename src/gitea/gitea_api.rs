@@ -14,10 +14,11 @@
 /// You should have received a copy of the GNU General Public License
 /// along with this program. If not, see <https://www.gnu.org/licenses/>.
 use core::fmt;
-use std::{fmt::Display, io};
+use std::{fmt::Display, io, io::Write};
 
 use serde_derive::Deserialize;
 use serde_json::Value;
+use tabwriter::TabWriter;
 
 /// All possible errors which can happen by using the gitea api.
 #[derive(Debug)]
@@ -131,9 +132,20 @@ pub struct User {
 
 impl Display for User {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut tw = TabWriter::new(vec![]);
+
         write!(
-            f,
-            "Owner {} {{\n\t\tName: {}\n\t\tCreated: {}\n\t\tMail: {}\n\t\tAdmin: {}\n\t\tLang: {}\n\t\tLast Login: {}\n\t\tLogin: {}\n\t\tRestricted: {}\n\t}}",
+            &mut tw,
+            "
+\t\tid\t= {}
+\t\tName\t= {}
+\t\tCreated\t= {}
+\t\tMail\t= {}
+\t\tAdmin\t= {}
+\t\tLang\t= {}
+\t\tLast login\t= {}
+\t\tLogin\t= {}
+\t\tRestricted\t= {}",
             self.id,
             self.full_name,
             self.created,
@@ -142,8 +154,27 @@ impl Display for User {
             self.language,
             self.last_login,
             self.login,
-            self.restricted,
+            self.restricted
         )
+        .unwrap();
+        tw.flush().unwrap();
+        let written = String::from_utf8(tw.into_inner().unwrap()).unwrap();
+        write!(f, "{}", written)
+
+        // write!(
+        //     f,
+        //     "Owner {} {{\n\t\tName: {}\n\t\tCreated: {}\n\t\tMail: {}\n\t\tAdmin: {}\n\t\tLang: {}
+        // \n\t\tLast Login: {}\n\t\tLogin: {}\n\t\tRestricted: {}\n\t}}",
+        //     self.id,
+        //     self.full_name,
+        //     self.created,
+        //     self.email,
+        //     self.is_admin,
+        //     self.language,
+        //     self.last_login,
+        //     self.login,
+        //     self.restricted,
+        // )
     }
 }
 
@@ -179,7 +210,35 @@ pub struct Repository {
 
 impl Display for Repository {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Repository {} {{\n\tName: {}\n\tFull Name: {}\n\tDescription: {}\n\tEmpty: {}\n\tUpdated At: {}\n\t{}\n\t{}\n}}", self.id, self.name, self.full_name, self.description, self.empty, self.updated_at, self.permissions, self.owner)
+        let mut tw = TabWriter::new(vec![]);
+
+        write!(
+            &mut tw,
+            "Repository {} {{
+\tName\t= {}
+\tFull name\t= {}
+\tDescription\t= {}
+\tEmpty\t= {}
+\tUpdated at\t= {}
+\tPermissions\t= {}
+\tOwner\t= {{ {}
+\t}}
+}}",
+            self.id,
+            self.name,
+            self.full_name,
+            self.description,
+            self.empty,
+            self.updated_at,
+            self.permissions,
+            self.owner
+        )
+        .unwrap();
+        tw.flush().unwrap();
+        let written = String::from_utf8(tw.into_inner().unwrap()).unwrap();
+        write!(f, "{}", written)
+
+        // write!(f, "Repository {} {{\n\tName: {}\n\tFull Name: {}\n\tDescription: {}\n\tEmpty: {}\n\tUpdated At: {}\n\t{}\n\t{}\n}}", self.id, self.name, self.full_name, self.description, self.empty, self.updated_at, self.permissions, self.owner)
     }
 }
 
@@ -237,14 +296,28 @@ pub struct ContentEntry {
 
 impl Display for ContentEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut tw = TabWriter::new(vec![]);
+
         write!(
-            f,
-            "{}\t\t\t{}\t\t\t\t{}\t\t{}",
+            &mut tw,
+            "{}\t{}\t{}",
             self.name,
-            self.path,
             self.content_type,
-            self.sha.as_ref().unwrap_or(&"No SHA".to_string())
+            self.path,
+            // self.sha.as_ref().unwrap_or(&"No SHA".to_string())
         )
+        .unwrap();
+        tw.flush().unwrap();
+        let written = String::from_utf8(tw.into_inner().unwrap()).unwrap();
+        write!(f, "{}", written)
+        // write!(
+        //             f,
+        //             "{}\t\t\t{}\t\t\t\t{}\t\t{}",
+        //             self.name,
+        //             self.path,
+        //             self.content_type,
+        //             self.sha.as_ref().unwrap_or(&"No SHA".to_string())
+        //         )
     }
 }
 
@@ -287,11 +360,21 @@ pub struct ContentsResponse {
 
 impl Display for ContentsResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Name\t\t\t\tPath\t\t\t\tType\t\tSHA\n")?;
+        let mut tw = TabWriter::new(vec![]).padding(15);
+        write!(&mut tw, "Name\tPath\n");
+
+        // write!(f, "Name\t\t\t\tPath\t\t\t\tType\t\tSHA\n")?;
         for entry in &self.content {
-            write!(f, "{}\n", entry)?;
+            // write!(f, "{}\n", entry)?;
+            //write!(&mut tw, "{}\n", entry).unwrap();
+            write!(&mut tw, "{}\t{}\n", entry.name, entry.path).unwrap();
         }
-        Ok(())
+
+        tw.flush().unwrap();
+        let written = String::from_utf8(tw.into_inner().unwrap()).unwrap();
+        write!(f, "{}", written)
+
+        // Ok(())
     }
 }
 

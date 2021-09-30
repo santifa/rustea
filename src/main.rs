@@ -17,13 +17,17 @@
 extern crate clap;
 extern crate base64;
 extern crate faccess;
+extern crate self_update;
 extern crate serde;
 extern crate serde_json;
+extern crate tabwriter;
+extern crate term_table;
 extern crate toml;
 extern crate ureq;
 
 use clap::App;
 use rustea::Configuration;
+use self_update::cargo_crate_version;
 use std::process::exit;
 
 // Create the rustea cli
@@ -34,25 +38,26 @@ fn app() -> App<'static, 'static> {
             (author: "Henrik Jürges <juerges.henrik@gmail.com")
             (about: "A small utility for fetching configurations from gitea.")
             (@arg CONFIG: -c --config +takes_value "Set a custom configuration file")
-             (@arg PRINT: -p --print "Print current configuration")
+            (@arg PRINT: -p --print "Print current configuration")
+            (@arg CMT_MSG: -m --message +takes_value "Provide a commit message for new, delete, rename and push.")
+            (@arg UPDATE: -u --update "Run the self-updater")
             (@subcommand init =>
              (about: "Create a new configuration for rustea.")
              (@arg URL: +required "The base url to the gitea instance without the trailing slash.")
              (@arg REPOSITORY: +required "The repository name")
              (@arg OWNER: +required "The repository owner")
              (@arg API_TOKEN: --token +takes_value "Provide the api token for gitea")
-             (@arg TOKEN_NAME: --name +takes_value "Provide a name for the api token")
-            )
+             (@arg TOKEN_NAME: --name +takes_value "Provide a name for the api token"))
             (@subcommand info =>
              (about: "Show informations about and gitea and the configuration repository."))
             (@subcommand list =>
              (about: "Show the feature sets stored in the repository.")
-            (@arg FEATURE: "List the content of a feature set."))
+             (@arg FEATURE: "List the content of a feature set."))
             (@subcommand new =>
              (about: "Create a new empty feature set in the devops repository.")
              (@arg NAME: +required "Name of the feature set"))
             (@subcommand delete =>
-             (about: "Delete a feature set or parts of it")
+             (about: "Delete a feature set or a part of it")
              (@arg RECURSIVE: -r --recursive "Delete a remote folder recursively")
              (@arg SCRIPT: -s --script "Delete a script file from a feature set")
              (@arg NAME: +required "Name of the feature set")
@@ -61,13 +66,31 @@ fn app() -> App<'static, 'static> {
              (about: "Deploy a feature set from the devops repository.")
              (@arg SCRIPT: -s --script "Deploy only the script files of a feature set")
              (@arg CONFIG: -c --config "Deploy only the configuration files of a feature set")
-             (@arg NAME: +required "Name of the feature set to pull"))
+             (@arg NAME: +required "Name of the feature set to pull")
+             (@arg PATH: "Path to a file or folder from the feature set"))
             (@subcommand push =>
              (about: "Push a feature set to the devops repository.")
              (@arg SCRIPT: -s --script "Push a script file or folder to the devops repository.")
              (@arg NAME: +required "Name of the feature set to push")
              (@arg PATH: "Path to the config or script file or folder"))
+            (@subcommand rename =>
+             (about: "Rename a file or folder within a feature set or a feature set if no path is given.")
+             (@arg NAME: +required "Name of the feature set")
+             (@arg PATH: "Path to file or folder which should be renamed"))
     )
+}
+
+fn update() -> Result<(), Box<dyn::std::error::Error>> {
+    let status = self_update::backends::github::Update::configure()
+        .repo_owner("santifa")
+        .repo_name("rustea")
+        .bin_name("github")
+        .show_download_progress(true)
+        .current_version(cargo_crate_version!())
+        .build()?
+        .update()?;
+    println!("Update status: `{}`!", status.version());
+    Ok(())
 }
 
 fn main() {
@@ -88,6 +111,21 @@ fn main() {
             }
         }
     }
+
+    if matches.is_present("UPDATE") {
+        match update() {
+            Ok(()) => {
+                println!("Successfully Updated");
+                exit(0)
+            }
+            Err(e) => {
+                eprintln!("Update failed: Reason {}", e);
+                exit(1)
+            }
+        }
+    }
+
+    let cmt_msg = matches.value_of("CMT_MSG");
 
     // We shall evaluate this subcommand before loading the configuration file
     if let Some(sub) = matches.subcommand_matches("init") {
@@ -136,7 +174,10 @@ fn main() {
         }
         Some("new") => {
             let sub = matches.subcommand_matches("new").unwrap();
-            match conf.repo.new_feature_set(sub.value_of("NAME").unwrap()) {
+            match conf
+                .repo
+                .new_feature_set(sub.value_of("NAME").unwrap(), cmt_msg)
+            {
                 Ok(_) => exit(0),
                 Err(e) => println!("Can not fetch informations. Cause: {}", e),
             }
@@ -148,6 +189,7 @@ fn main() {
                 sub.value_of("PATH"),
                 sub.is_present("SCRIPT"),
                 sub.is_present("RECURSIVE"),
+                cmt_msg,
             ) {
                 Ok(_) => println!(
                     "Successfully deleted {} from the feature set {}",
@@ -166,6 +208,7 @@ fn main() {
             let sub = matches.subcommand_matches("pull").unwrap();
             match conf.repo.pull(
                 sub.value_of("NAME").unwrap(),
+                sub.value_of("PATH"),
                 &conf.script_folder,
                 sub.is_present("SCRIPT"),
                 sub.is_present("CONFIG"),
@@ -188,6 +231,7 @@ fn main() {
                 &conf.script_folder,
                 sub.value_of("PATH"),
                 sub.is_present("SCRIPT"),
+                cmt_msg,
             ) {
                 Ok(_) => println!(
                     "Successfully pushed files to feature set {}",
@@ -199,6 +243,9 @@ fn main() {
                     e
                 ),
             }
+        }
+        Some("rename") => {
+            let sub = matches.subcommand_matches("rename").unwrap();
         }
         _ => {
             // We have no valid subcommand, but normaly clap checks this case

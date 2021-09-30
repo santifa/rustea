@@ -34,6 +34,7 @@ use std::{
     io::{Read, Write},
     path::PathBuf,
 };
+use tabwriter::TabWriter;
 
 use crate::gitea::gitea_api::ContentType;
 
@@ -134,6 +135,20 @@ pub struct Configuration {
     pub repo: RemoteRepository,
 }
 
+impl Display for Configuration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let p = PathBuf::from(&self.script_folder).canonicalize();
+
+        write!(
+            f,
+            "Using rustea version {}\nscript_folder = {}\nrepo = {{\n{}\n}}",
+            VERSION,
+            p.unwrap().display(),
+            self.repo
+        )
+    }
+}
+
 impl Configuration {
     /// This function tries to read and convert the file provided as `PathBuf` into a new `Configuration`.
     pub fn read_config_file(path: Option<&str>) -> Result<Configuration> {
@@ -180,16 +195,6 @@ impl Configuration {
     }
 }
 
-impl Display for Configuration {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Using rustea version {}\nscript_folder={}\nrepo={{\n{}}}",
-            VERSION, self.script_folder, self.repo
-        )
-    }
-}
-
 /// This struct defines the access to the remote repository
 /// which contains the features sets used by rustea.
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -200,6 +205,27 @@ pub struct RemoteRepository {
     pub owner: String,
     pub email: String,
     pub author: String,
+}
+
+impl Display for RemoteRepository {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut tw = TabWriter::new(vec![]);
+
+        write!(
+            &mut tw,
+            "\turl\t= {}
+             \tapi_token\t= {}
+             \trepository\t= {}
+             \towner\t= {}
+             \temail\t= {}
+             \tauthor\t= {}",
+            self.url, self.api_token, self.repository, self.owner, self.email, self.author
+        )
+        .unwrap();
+        tw.flush().unwrap();
+        let written = String::from_utf8(tw.into_inner().unwrap()).unwrap();
+        write!(f, "{}", written)
+    }
 }
 
 impl RemoteRepository {
@@ -269,7 +295,7 @@ impl RemoteRepository {
     /// If the feature already exists nothing is returned and indicates success,
     /// Normaly the API returns the content entry for the created file but this is
     /// useless in this case. We only check the HTTP return code.
-    pub fn new_feature_set(&self, feature_set: &str) -> Result<()> {
+    pub fn new_feature_set(&self, feature_set: &str, cmt_msg: Option<&str>) -> Result<()> {
         let api = self.create_api_client()?;
         if !self.check_feature_set_exists(&api, feature_set)? {
             api.create_or_update_file(
@@ -303,6 +329,7 @@ impl RemoteRepository {
         path: Option<&str>,
         script: bool,
         recursive: bool,
+        cmt_msg: Option<&str>,
     ) -> Result<()> {
         let api = self.create_api_client()?;
         match path {
@@ -368,6 +395,7 @@ impl RemoteRepository {
         script_dir: &str,
         path: Option<&str>,
         script: bool,
+        cmt_msg: Option<&str>,
     ) -> Result<()> {
         let api = self.create_api_client()?;
         if !self.check_feature_set_exists(&api, name)? {
@@ -436,7 +464,14 @@ impl RemoteRepository {
     /// are pulled depending on the `script` and `config` argument. If both are set
     /// to true only script files are pulled to the local machine.
     /// If both arguments are set to false everything if pulled from the feature set.
-    pub fn pull(&self, name: &str, script_dir: &str, script: bool, config: bool) -> Result<()> {
+    pub fn pull(
+        &self,
+        name: &str,
+        path: Option<&str>,
+        script_dir: &str,
+        script: bool,
+        config: bool,
+    ) -> Result<()> {
         let api = self.create_api_client()?;
         if !self.check_feature_set_exists(&api, name)? {
             return Err(Error::Push(format!("No features set named {}", name)));
@@ -467,16 +502,6 @@ impl RemoteRepository {
             }
         }
         Ok(())
-    }
-}
-
-impl Display for RemoteRepository {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "\turl={}\n\tapi_token={}\n\trepository={}\n\towner={}\n",
-            self.url, self.api_token, self.repository, self.owner
-        )
     }
 }
 
