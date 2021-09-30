@@ -21,7 +21,6 @@ extern crate self_update;
 extern crate serde;
 extern crate serde_json;
 extern crate tabwriter;
-extern crate term_table;
 extern crate toml;
 extern crate ureq;
 
@@ -76,7 +75,8 @@ fn app() -> App<'static, 'static> {
             (@subcommand rename =>
              (about: "Rename a file or folder within a feature set or a feature set if no path is given.")
              (@arg NAME: +required "Name of the feature set")
-             (@arg PATH: "Path to file or folder which should be renamed"))
+             (@arg NEW_NAME: +required "New name of the file, folder or feature set")
+             (@arg PATH: -p --path +takes_value "Path to file or folder which should be renamed"))
     )
 }
 
@@ -246,6 +246,15 @@ fn main() {
         }
         Some("rename") => {
             let sub = matches.subcommand_matches("rename").unwrap();
+            match conf.repo.rename(
+                sub.value_of("NAME").unwrap(),
+                sub.value_of("NEW_NAME").unwrap(),
+                sub.value_of("PATH"),
+            ) {
+                Ok(_) => println!("Successfully renamed files."),
+
+                Err(e) => eprintln!("Failed to rename files. Error: {}", e),
+            }
         }
         _ => {
             // We have no valid subcommand, but normaly clap checks this case

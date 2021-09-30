@@ -304,6 +304,7 @@ impl RemoteRepository {
                 "".as_bytes(),
                 &self.author,
                 &self.email,
+                cmt_msg,
             )?;
             api.create_or_update_file(
                 feature_set,
@@ -311,6 +312,7 @@ impl RemoteRepository {
                 "".as_bytes(),
                 &self.author,
                 &self.email,
+                cmt_msg,
             )?;
         }
         Ok(())
@@ -338,14 +340,16 @@ impl RemoteRepository {
                 false,
                 &self.author,
                 &self.email,
+                cmt_msg,
             ),
             Some(path) => api.delete_file_or_folder(
                 &format!("{}/{}", name, path),
                 recursive,
                 &self.author,
                 &self.email,
+                cmt_msg,
             ),
-            None => api.delete_file_or_folder(name, true, &self.author, &self.email),
+            None => api.delete_file_or_folder(name, true, &self.author, &self.email, cmt_msg),
         }
         .map_err(Error::ApiError)
     }
@@ -361,6 +365,7 @@ impl RemoteRepository {
         // files: &[PathBuf],
         feature_set: &str,
         script: bool,
+        cmt_msg: Option<&str>,
     ) -> Result<()> {
         let files = read_folder(&path)?;
         for file in files {
@@ -372,6 +377,7 @@ impl RemoteRepository {
                 &content,
                 &self.author,
                 &self.email,
+                cmt_msg,
             )?;
             println!(
                 "Pushed file {} into feature set {}",
@@ -406,7 +412,7 @@ impl RemoteRepository {
             // Push a config or script file or folder
             let path = PathBuf::from(path).canonicalize()?;
             if path.exists() {
-                self.push_files(&api, &path, name, script)?;
+                self.push_files(&api, &path, name, script, cmt_msg)?;
             } else {
                 return Err(Error::Push(format!(
                     "File {} doesn't exists",
@@ -422,7 +428,7 @@ impl RemoteRepository {
                 let script = entry.path.starts_with(&script_remote);
                 let file_path = to_local_path(&entry.path, script, script_dir)?;
                 if file_path.exists() {
-                    self.push_files(&api, &file_path, name, script)?;
+                    self.push_files(&api, &file_path, name, script, cmt_msg)?;
                 }
             }
         }
@@ -501,6 +507,10 @@ impl RemoteRepository {
                 self.pull_files(&api, &[file], script, script_dir)?;
             }
         }
+        Ok(())
+    }
+
+    pub fn rename(&self, name: &str, new_name: &str, path: Option<&str>) -> Result<()> {
         Ok(())
     }
 }

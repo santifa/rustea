@@ -16,7 +16,7 @@
 pub mod gitea_api;
 
 use base64::encode;
-use std::{borrow::Cow, io::Write};
+use std::io::Write;
 use ureq::{Agent, AgentBuilder};
 
 use gitea_api::{ApiError, ApiResult, ApiToken, ContentsResponse, Repository, Version};
@@ -213,9 +213,17 @@ impl GiteaClient {
         content: &[u8],
         author: &str,
         mail: &str,
+        cmt_msg: Option<&str>,
     ) -> ApiResult<String> {
-        let body =
+        let mut msg = match cmt_msg {
+            Some(s) => ureq::json!({ "message": s }),
+            None => ureq::json!({}),
+        };
+        let mut body =
             ureq::json!({"author": { "email": mail, "name": author}, "content": encode(content) });
+        body.as_object_mut()
+            .unwrap()
+            .append(&mut msg.as_object_mut().unwrap());
         self.client
             .post(&format!(
                 "{}{}/repos/{}/{}/contents/{}{}",
@@ -237,10 +245,21 @@ impl GiteaClient {
         content: &[u8],
         author: &str,
         mail: &str,
+        cmt_msg: Option<&str>,
     ) -> ApiResult<String> {
         if self.check_file_exists(feature_name, filename) {
             let files = self.get_file_or_folder(&format!("{}{}", feature_name, filename), None)?;
             let file_sha = files.content[0].sha.as_ref().unwrap();
+
+            let mut msg = match cmt_msg {
+                Some(s) => ureq::json!({ "message": s }),
+                None => ureq::json!({}),
+            };
+            let mut body = ureq::json!({"author": { "email": mail, "name": author}, "content": encode(content), "sha": file_sha, "message": cmt_msg });
+
+            body.as_object_mut()
+                .unwrap()
+                .append(&mut msg.as_object_mut().unwrap());
 
             self.client
                 .put(&format!(
@@ -249,11 +268,11 @@ impl GiteaClient {
                 ))
                 .set("Authorization", &format!("token {}", self.api_token))
                 .set("content-type", "application/json")
-                .send_json(ureq::json!({"author": { "email": mail, "name": author}, "content": encode(content), "sha": file_sha  }))?
+                .send_json(body)?
                 .into_string()
                 .map_err(ApiError::Io)
         } else {
-            self.create_file(feature_name, filename, content, author, mail)
+            self.create_file(feature_name, filename, content, author, mail, cmt_msg)
         }
     }
 
@@ -264,14 +283,25 @@ impl GiteaClient {
         file_sha: &str,
         author: &str,
         mail: &str,
+        cmt_msg: Option<&str>,
     ) -> ApiResult<String> {
+        let mut msg = match cmt_msg {
+            Some(s) => ureq::json!({ "message": s }),
+            None => ureq::json!({}),
+        };
+        let mut body = ureq::json!({"author": { "email": mail, "name": author}, "sha": file_sha , "message": cmt_msg });
+
+        body.as_object_mut()
+            .unwrap()
+            .append(&mut msg.as_object_mut().unwrap());
+
         self.client
             .delete(&format!(
                 "{}{}/repos/{}/{}/contents/{}",
                 self.url, API_PART, self.owner, self.repository, name
             ))
             .set("Authorization", &format!("token {}", self.api_token))
-            .send_json(ureq::json!({"author": { "email": mail, "name": author}, "sha": file_sha }))?
+            .send_json(ureq::json!({"author": { "email": mail, "name": author}, "sha": file_sha , "message": cmt_msg }))?
             .into_string()
             .map_err(ApiError::Io)
     }
@@ -285,6 +315,7 @@ impl GiteaClient {
         recursive: bool,
         author: &str,
         mail: &str,
+        cmt_msg: Option<&str>,
     ) -> ApiResult<()> {
         let content = self.get_file_or_folder(name, None)?;
 
@@ -292,13 +323,25 @@ impl GiteaClient {
             match file.content_type {
                 ContentType::Dir => {
                     if recursive {
-                        self.delete_file_or_folder(&file.path, true, author, mail)?;
+                        self.delete_file_or_folder(&file.path, true, author, mail, cmt_msg)?;
                     } else {
-                        self.delete_file(&file.path, file.sha.as_ref().unwrap(), author, mail)?;
+                        self.delete_file(
+                            &file.path,
+                            file.sha.as_ref().unwrap(),
+                            author,
+                            mail,
+                            cmt_msg,
+                        )?;
                     }
                 }
                 _ => {
-                    self.delete_file(&file.path, file.sha.as_ref().unwrap(), author, mail)?;
+                    self.delete_file(
+                        &file.path,
+                        file.sha.as_ref().unwrap(),
+                        author,
+                        mail,
+                        cmt_msg,
+                    )?;
                 }
             }
         }

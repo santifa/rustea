@@ -160,21 +160,6 @@ impl Display for User {
         tw.flush().unwrap();
         let written = String::from_utf8(tw.into_inner().unwrap()).unwrap();
         write!(f, "{}", written)
-
-        // write!(
-        //     f,
-        //     "Owner {} {{\n\t\tName: {}\n\t\tCreated: {}\n\t\tMail: {}\n\t\tAdmin: {}\n\t\tLang: {}
-        // \n\t\tLast Login: {}\n\t\tLogin: {}\n\t\tRestricted: {}\n\t}}",
-        //     self.id,
-        //     self.full_name,
-        //     self.created,
-        //     self.email,
-        //     self.is_admin,
-        //     self.language,
-        //     self.last_login,
-        //     self.login,
-        //     self.restricted,
-        // )
     }
 }
 
@@ -237,8 +222,6 @@ impl Display for Repository {
         tw.flush().unwrap();
         let written = String::from_utf8(tw.into_inner().unwrap()).unwrap();
         write!(f, "{}", written)
-
-        // write!(f, "Repository {} {{\n\tName: {}\n\tFull Name: {}\n\tDescription: {}\n\tEmpty: {}\n\tUpdated At: {}\n\t{}\n\t{}\n}}", self.id, self.name, self.full_name, self.description, self.empty, self.updated_at, self.permissions, self.owner)
     }
 }
 
@@ -301,23 +284,12 @@ impl Display for ContentEntry {
         write!(
             &mut tw,
             "{}\t{}\t{}",
-            self.name,
-            self.content_type,
-            self.path,
-            // self.sha.as_ref().unwrap_or(&"No SHA".to_string())
+            self.name, self.content_type, self.path,
         )
         .unwrap();
         tw.flush().unwrap();
         let written = String::from_utf8(tw.into_inner().unwrap()).unwrap();
         write!(f, "{}", written)
-        // write!(
-        //             f,
-        //             "{}\t\t\t{}\t\t\t\t{}\t\t{}",
-        //             self.name,
-        //             self.path,
-        //             self.content_type,
-        //             self.sha.as_ref().unwrap_or(&"No SHA".to_string())
-        //         )
     }
 }
 
@@ -363,18 +335,13 @@ impl Display for ContentsResponse {
         let mut tw = TabWriter::new(vec![]).padding(15);
         write!(&mut tw, "Name\tPath\n");
 
-        // write!(f, "Name\t\t\t\tPath\t\t\t\tType\t\tSHA\n")?;
         for entry in &self.content {
-            // write!(f, "{}\n", entry)?;
-            //write!(&mut tw, "{}\n", entry).unwrap();
             write!(&mut tw, "{}\t{}\n", entry.name, entry.path).unwrap();
         }
 
         tw.flush().unwrap();
         let written = String::from_utf8(tw.into_inner().unwrap()).unwrap();
         write!(f, "{}", written)
-
-        // Ok(())
     }
 }
 

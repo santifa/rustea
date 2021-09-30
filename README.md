@@ -114,7 +114,11 @@ Afterwards, you can either create the `~/.rustea.toml` by yourself or run `ruste
   * [x] Abort on panic instead of unwind the stack with `panic = 'abort'`
   * [ ] Use xargo for `std`
   * [ ] Remove `libstd`
+  * [x] Strip symbols with `cargo-strip` 
   * [x] Compress the binary with upx
+
+The last two options can lead to insufficient error messsages and virus scanner alert. 
+Thus, two version are provided with and without striped symbols and compression.
 
 ## Development
 
@@ -128,14 +132,20 @@ the project root which points to an empty remote repository.
 ### Todo's
 
 A small list of features that came in my mind:
-  * [ ] Commit messages from `rustea`
+  * [x] Commit messages from `rustea`
   * [x] Use binary format for reading files
-  * [ ] Ignore specific files like `.git`
+  * [x] self-updater
+  * [ ] Rename features set, files or folder on the remote repository
+  * [ ] set symlink files (e.g. for cron-jobs)
+  * [x] better terminal support (better display of tables)
+  * [ ] installing packages, distribution agnostic?
+  * [+] Ignore specific files like `.git` (only git files hardcoded)
   * [ ] Pull single configuration or script files from a feature set
   * [ ] Provide other backends like Gitlab or Github
   * [ ] Show diff between the local and remote configuration
   * [ ] More extensives tests
   * [ ] feature set and local folder diff
+  * [ ] Scripts should be executable
   * [x] Replace (https://docs.rs/reqwest/0.11.4/reqwest/index.html)[`reqwest`] with something smaller; (https://docs.rs/curl/0.4.38/curl/index.html)[curl-bindings], (https://github.com/algesten/ureq)[ureq]
 
 ### Workflows
