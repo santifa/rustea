@@ -140,7 +140,7 @@ A small list of features that came in my mind:
   * [x] better terminal support (better display of tables)
   * [ ] installing packages, distribution agnostic?
   * [+] Ignore specific files like `.git` (only git files hardcoded)
-  * [ ] Pull single configuration or script files from a feature set
+  * [x] Pull single configuration or script files from a feature set
   * [ ] Provide other backends like Gitlab or Github
   * [ ] Show diff between the local and remote configuration
   * [ ] More extensives tests
@@ -202,7 +202,9 @@ of `rustea` from a user perspective.
   * The user deploys a feature set with `rustea pull <fs-name>`
       * For only deploying script files use `rustea pull --script <fs-name>`
       * For only deploying configuration files use `rustea pull --config <fs-name>`
-  * `rustea` fetches the content of the feature set and copies script files to `/usr/local/bin` 
+      * Use `rustea pull <fs-name> <path>` for pulling a single file or folder from the feature set
+      * The path is the absolute or relative path of the file or folder on the filesystem. 
+  * `rustea` fetches the content of the feature set and copies script files to `/usr/local/bin`
     and configration files to their repository path name without the feature set name
   * Local copies are overwritten
   * Sudo is required if the files are copied into filesystem regions where the user has no rights
