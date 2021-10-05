@@ -457,6 +457,7 @@ impl RemoteRepository {
             if !script {
                 check_folder(&path.parent().unwrap().to_string_lossy())?;
             }
+
             let mut f = File::create(&path)?;
             f.write_all(content.as_bytes()).map_err(Error::IoError)?;
             if script {
@@ -684,7 +685,7 @@ fn to_local_path(remote_path: &str, script: bool, script_dir: &str) -> Result<Pa
 /// This function takes a folder path and creates the path if it
 /// not exists and checks if the path is writable afterwards.
 fn check_folder(dir: &str) -> Result<()> {
-    let path = PathBuf::from(dir).canonicalize()?;
+    let path = PathBuf::from(dir);
     if !path.exists() {
         fs::DirBuilder::new().recursive(true).create(&path)?;
     }

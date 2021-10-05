@@ -149,7 +149,7 @@ A small list of features that came in my mind:
   * [ ] Show diff between the local and remote configuration
   * [ ] More extensives tests
   * [ ] feature set and local folder diff
-  * [x] Scripts should be executable (this is set explicit to 741)
+  * [x] Scripts should be executable (this is set explicit to 751)
   * [x] Replace (https://docs.rs/reqwest/0.11.4/reqwest/index.html)[`reqwest`] with something smaller; (https://docs.rs/curl/0.4.38/curl/index.html)[curl-bindings], (https://github.com/algesten/ureq)[ureq]
 
 ### Workflows
