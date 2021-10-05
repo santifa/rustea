@@ -333,7 +333,7 @@ pub struct ContentsResponse {
 impl Display for ContentsResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut tw = TabWriter::new(vec![]).padding(15);
-        write!(&mut tw, "Name\tPath\n");
+        write!(&mut tw, "Name\tPath\n").unwrap();
 
         for entry in &self.content {
             write!(&mut tw, "{}\t{}\n", entry.name, entry.path).unwrap();

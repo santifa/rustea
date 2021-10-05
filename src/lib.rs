@@ -26,6 +26,7 @@ use gitea::{
     GiteaClient,
 };
 use serde_derive::{Deserialize, Serialize};
+use std::os::unix::fs::PermissionsExt;
 use std::{
     env,
     fmt::Display,
@@ -458,6 +459,11 @@ impl RemoteRepository {
             }
             let mut f = File::create(&path)?;
             f.write_all(content.as_bytes()).map_err(Error::IoError)?;
+            if script {
+                let mut perms = f.metadata()?.permissions();
+                perms.set_mode(0o751);
+                f.set_permissions(perms)?;
+            }
             println!("Pulled file {}", path.display());
         }
         Ok(())
@@ -470,6 +476,12 @@ impl RemoteRepository {
     /// are pulled depending on the `script` and `config` argument. If both are set
     /// to true only script files are pulled to the local machine.
     /// If both arguments are set to false everything if pulled from the feature set.
+    ///
+    /// ## Attention
+    ///
+    /// If `path` is provided `script` or `config` flag is set only files matching
+    /// the path are pulled. This doesn't distinguishes between remote pathes with the same suffix.
+    /// Meaning `/test` and `/example/test` are the same if only `test` is given as path.
     pub fn pull(
         &self,
         name: &str,
@@ -498,6 +510,10 @@ impl RemoteRepository {
                         !e.path.starts_with(&prefix)
                     }
                 })
+                .filter(|e| match path {
+                    Some(p) => e.path.ends_with(&p),
+                    None => true,
+                })
                 .collect::<Vec<ContentEntry>>();
             self.pull_files(&api, &files, script, script_dir)?;
         } else {
@@ -510,7 +526,88 @@ impl RemoteRepository {
         Ok(())
     }
 
-    pub fn rename(&self, name: &str, new_name: &str, path: Option<&str>) -> Result<()> {
+    /// This function renames either feature sets or folder and files within the remote repository.
+    ///
+    /// Provide the feature set `name` in which the files should be moved. If the `path` is
+    /// empty the whole feature set is renamed. Otherwise, the `path` is resolved and the
+    /// last part of the path (after `/`) is replaced with `new_name`.
+    ///
+    /// Script files can not be renamed.
+    pub fn rename(
+        &self,
+        name: &str,
+        new_name: &str,
+        _path: Option<&str>,
+        cmt_msg: Option<&str>,
+    ) -> Result<()> {
+        let api = self.create_api_client()?;
+        if !self.check_feature_set_exists(&api, name)? {
+            return Err(Error::Push(format!("No features set named {}", name)));
+        }
+        let feature_set = api.get_folder(name)?;
+
+        self.new_feature_set(new_name, None)?;
+        for file in feature_set.content {
+            let content = api.download_file(&file.path)?;
+            let base_path = file.path.strip_prefix(name).unwrap();
+            api.create_or_update_file(
+                new_name,
+                &base_path,
+                content.as_bytes(),
+                &self.author,
+                &self.email,
+                cmt_msg,
+            )?;
+        }
+        self.delete(name, None, false, true, cmt_msg)?;
+
+        // match path {
+        //     Some(p) => {
+        //         // Distinguish between script files and normal files by existence
+        //         let files = feature_set.content.into_iter().find(|e| e.path.ends_with(p));
+
+        //         // Fetch the folder or file
+        //         let files = api.get_folder(pbuf?.to_str().unwrap())?;
+        //         // Convert old path to new one
+        //         let new_path = match p.split_once("/") {
+        //             Some((_, path)) => format!("{}/{}", path, new_name),
+        //             None => new_name.into(),
+        //         };
+
+        //         for file in files.content {
+        //             let content = api.download_file(&file.path)?;
+
+        //             //let base_path = file.path;
+
+        //             api.create_or_update_file(
+        //                 name,
+        //                 &new_path,
+        //                 content.as_bytes(),
+        //                 &self.author,
+        //                 &self.email,
+        //                 cmt_msg,
+        //             )?;
+        //         }
+        //         self.delete(name, path, false, true, cmt_msg)?;
+        //     }
+        //     None => {
+        //         // Rename the feature set
+        //         self.new_feature_set(new_name, None)?;
+        //         for file in feature_set.content {
+        //             let content = api.download_file(&file.path)?;
+        //             let base_path = file.path.strip_prefix(name).unwrap();
+        //             api.create_or_update_file(
+        //                 new_name,
+        //                 &base_path,
+        //                 content.as_bytes(),
+        //                 &self.author,
+        //                 &self.email,
+        //                 cmt_msg,
+        //             )?;
+        //         }
+        //         self.delete(name, None, false, true, cmt_msg)?;
+        //     }
+        // }
         Ok(())
     }
 }

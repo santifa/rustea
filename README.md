@@ -135,17 +135,21 @@ A small list of features that came in my mind:
   * [x] Commit messages from `rustea`
   * [x] Use binary format for reading files
   * [x] self-updater
-  * [ ] Rename features set, files or folder on the remote repository
+  * [+] Rename features set, files or folder on the remote repository
+    * [x] feature sets
+    * [ ] files
+    * [ ] folders
   * [ ] set symlink files (e.g. for cron-jobs)
   * [x] better terminal support (better display of tables)
   * [ ] installing packages, distribution agnostic?
   * [+] Ignore specific files like `.git` (only git files hardcoded)
   * [x] Pull single configuration or script files from a feature set
+        (Doesn't distinguishes between similar named pathes like `/test` and `/testtest` when only `test` is given)
   * [ ] Provide other backends like Gitlab or Github
   * [ ] Show diff between the local and remote configuration
   * [ ] More extensives tests
   * [ ] feature set and local folder diff
-  * [ ] Scripts should be executable
+  * [x] Scripts should be executable (this is set explicit to 741)
   * [x] Replace (https://docs.rs/reqwest/0.11.4/reqwest/index.html)[`reqwest`] with something smaller; (https://docs.rs/curl/0.4.38/curl/index.html)[curl-bindings], (https://github.com/algesten/ureq)[ureq]
 
 ### Workflows

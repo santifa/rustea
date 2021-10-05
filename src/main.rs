@@ -250,6 +250,7 @@ fn main() {
                 sub.value_of("NAME").unwrap(),
                 sub.value_of("NEW_NAME").unwrap(),
                 sub.value_of("PATH"),
+                cmt_msg,
             ) {
                 Ok(_) => println!("Successfully renamed files."),
 
