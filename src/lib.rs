@@ -63,9 +63,9 @@ pub fn get_default_path() -> Result<String> {
 /// The main configuration is serialized by the toml library.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct RusteaConfiguration {
-    pub script_folder: PathBuf,
-    pub exclude: String,
-    pub repo: RepositoryConfig,
+    script_folder: PathBuf,
+    exclude: String,
+    repo: RepositoryConfig,
 }
 
 impl Display for RusteaConfiguration {
@@ -130,13 +130,13 @@ impl RusteaConfiguration {
 /// This struct defines the access to the remote repository
 /// which contains the features sets used by rustea.
 #[derive(Debug, Default, Deserialize, Serialize)]
-pub struct RepositoryConfig {
-    pub url: String,
-    pub api_token: String,
-    pub repository: String,
-    pub owner: String,
-    pub email: String,
-    pub author: String,
+struct RepositoryConfig {
+    url: String,
+    api_token: String,
+    repository: String,
+    owner: String,
+    email: String,
+    author: String,
 }
 
 impl Display for RepositoryConfig {
@@ -160,34 +160,50 @@ impl Display for RepositoryConfig {
     }
 }
 
-struct RemoteRepository {
+/// The `RemoteRepository` deals with the actual backend repository
+/// and handles all the actions that can take place.
+pub struct RemoteRepository {
     config: RusteaConfiguration,
+    api: GiteaClient,
 }
 
-impl RepositoryConfig {
-    /// This function constructs a new Gitea API client for requests.
-    fn create_api_client(&self) -> Result<GiteaClient> {
-        GiteaClient::new(
-            &self.url,
-            Some(&self.api_token),
+impl Display for RemoteRepository {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let info = match self.info() {
+            Ok(c) => c,
+            Err(e) => format!("{}", e),
+        };
+        write!(f, "{}\n{}", self.config, info)
+    }
+}
+
+impl RemoteRepository {
+    /// Create a new `RemoteRepository` with an api client.
+    pub fn new(config: RusteaConfiguration) -> Result<Self> {
+        let c = GiteaClient::new(
+            &config.repo.url,
+            Some(&config.repo.api_token),
             None,
-            &self.repository,
-            &self.owner,
+            &config.repo.repository,
+            &config.repo.owner,
         )
-        .map_err(Error::Api)
+        .map_err(Error::Api)?;
+
+        Ok(RemoteRepository { config, api: c })
     }
 
     /// This function queries the remote repository root and
     /// returns a list of `ContentEntry` with `ContentType::Dir`.
     /// All directories in the root are considered as feature sets.
-    fn get_feature_sets(&self, api: &GiteaClient) -> Result<ContentsResponse> {
-        api.get_file_or_folder("", Some(ContentType::Dir))
+    fn get_feature_sets(&self) -> Result<ContentsResponse> {
+        self.api
+            .get_file_or_folder("", Some(ContentType::Dir))
             .map_err(Error::Api)
     }
 
     /// This function returns true if a certain folder in the remote repository root is found.
-    fn check_feature_set_exists(&self, api: &GiteaClient, name: &str) -> Result<bool> {
-        let content = self.get_feature_sets(&api)?.content;
+    fn check_feature_set_exists(&self, name: &str) -> Result<bool> {
+        let content = self.get_feature_sets()?.content;
         for e in content {
             if e.name == name {
                 return Ok(true);
@@ -198,30 +214,24 @@ impl RepositoryConfig {
 
     /// This function prints informations about the remote instance and the
     /// used repository to the command line.
-    pub fn info(&self) -> Result<()> {
-        let api = self.create_api_client()?;
-        let gitea_version = api.get_gitea_version()?;
-        let repository = api.get_repository_information()?;
-        println!("{}", gitea_version);
-        println!("{}", repository);
-        Ok(())
+    pub fn info(&self) -> Result<String> {
+        let gitea_version = self.api.get_gitea_version()?;
+        let repository = self.api.get_repository_information()?;
+        Ok(format!("{}\n{}", gitea_version, repository))
     }
 
     /// This function prints either the feature sets contained in the remote
     /// repository or if `name` is provided all files found in the feature set.
-    pub fn list(&self, feature_set: Option<&str>) -> Result<()> {
-        let api = self.create_api_client()?;
-        match feature_set {
-            Some(n) => {
-                let feature_set = api.get_folder(n)?;
-                println!("Feature Set: {}\n{}", n, feature_set);
-            }
-            None => {
-                let feature_sets = self.get_feature_sets(&api)?;
-                println!("Feature Sets:\n{}", feature_sets);
-            }
-        }
-        Ok(())
+    pub fn list(&self, feature_set: Option<String>) -> Result<String> {
+        let res = match feature_set {
+            Some(ref n) => self.api.get_folder(n)?,
+            None => self.get_feature_sets()?,
+        };
+        Ok(format!(
+            "{} content:\n{}",
+            feature_set.unwrap_or_else(|| String::from(&self.config.repo.repository)),
+            res
+        ))
     }
 
     /// This function creates a new feature set within the remote repositories root.
@@ -231,27 +241,26 @@ impl RepositoryConfig {
     /// If the feature already exists nothing is returned and indicates success,
     /// Normaly the API returns the content entry for the created file but this is
     /// useless in this case. We only check the HTTP return code.
-    pub fn new_feature_set(&self, feature_set: &str, cmt_msg: Option<&str>) -> Result<()> {
-        let api = self.create_api_client()?;
-        if !self.check_feature_set_exists(&api, feature_set)? {
-            api.create_or_update_file(
+    pub fn new_feature_set(&self, feature_set: &str, cmt_msg: Option<String>) -> Result<String> {
+        if !self.check_feature_set_exists(feature_set)? {
+            self.api.create_or_update_file(
                 feature_set,
                 "/.gitkeep",
                 "".as_bytes(),
-                &self.author,
-                &self.email,
-                cmt_msg,
+                &self.config.repo.author,
+                &self.config.repo.email,
+                cmt_msg.as_deref(),
             )?;
-            api.create_or_update_file(
+            self.api.create_or_update_file(
                 feature_set,
                 "/scripts/.gitkeep",
                 "".as_bytes(),
-                &self.author,
-                &self.email,
-                cmt_msg,
+                &self.config.repo.author,
+                &self.config.repo.email,
+                cmt_msg.as_deref(),
             )?;
         }
-        Ok(())
+        Ok(format!("Created new feature set {}.", feature_set))
     }
 
     /// This function tries to delete files from the remote repository.
@@ -264,30 +273,26 @@ impl RepositoryConfig {
     pub fn delete(
         &self,
         name: &str,
-        path: Option<&str>,
+        path: Option<String>,
         script: bool,
         recursive: bool,
-        cmt_msg: Option<&str>,
-    ) -> Result<()> {
-        let api = self.create_api_client()?;
-        match path {
-            Some(path) if script => api.delete_file_or_folder(
-                &format!("{}/scripts/{}", name, path),
-                false,
-                &self.author,
-                &self.email,
-                cmt_msg,
-            ),
-            Some(path) => api.delete_file_or_folder(
-                &format!("{}/{}", name, path),
-                recursive,
-                &self.author,
-                &self.email,
-                cmt_msg,
-            ),
-            None => api.delete_file_or_folder(name, true, &self.author, &self.email, cmt_msg),
-        }
-        .map_err(Error::Api)
+        cmt_msg: Option<String>,
+    ) -> Result<String> {
+        let (p, r) = match path {
+            Some(path) if script => (format!("{}/scripts/{}", name, path), false),
+            Some(path) => (format!("{}/{}", name, path), recursive),
+            None => (name.to_owned(), true),
+        };
+        self.api
+            .delete_file_or_folder(
+                &p,
+                r,
+                &self.config.repo.author,
+                &self.config.repo.email,
+                cmt_msg.as_deref(),
+            )
+            .map_err(Error::Api)?;
+        Ok(format!("Deleted {} successfully.", p))
     }
 
     /// This function pushes files located in a `path` to the feature set in the remote repository.
@@ -296,7 +301,6 @@ impl RepositoryConfig {
     /// argument. The existence of the `path` should be validated beforehand.
     fn push_files(
         &self,
-        api: &GiteaClient,
         path: &PathBuf,
         // files: &[PathBuf],
         feature_set: &str,
@@ -307,12 +311,12 @@ impl RepositoryConfig {
         for file in files {
             let remote_path = to_remote_path(&file, script)?;
             let content = read_file(&file)?;
-            api.create_or_update_file(
+            self.api.create_or_update_file(
                 feature_set,
                 &remote_path,
                 &content,
-                &self.author,
-                &self.email,
+                &self.config.repo.author,
+                &self.config.repo.email,
                 cmt_msg,
             )?;
             println!(
@@ -334,13 +338,11 @@ impl RepositoryConfig {
     pub fn push(
         &self,
         name: &str,
-        script_dir: &PathBuf,
-        path: Option<&str>,
+        path: Option<String>,
         script: bool,
-        cmt_msg: Option<&str>,
-    ) -> Result<()> {
-        let api = self.create_api_client()?;
-        if !self.check_feature_set_exists(&api, name)? {
+        cmt_msg: Option<String>,
+    ) -> Result<String> {
+        if !self.check_feature_set_exists(name)? {
             return Err(Error::Push(format!("No features set named {}", name)));
         }
 
@@ -348,7 +350,7 @@ impl RepositoryConfig {
             // Push a config or script file or folder
             let path = PathBuf::from(path).canonicalize()?;
             if path.exists() {
-                self.push_files(&api, &path, name, script, cmt_msg)?;
+                self.push_files(&path, name, script, cmt_msg.as_deref())?;
             } else {
                 return Err(Error::Push(format!(
                     "File {} doesn't exists",
@@ -357,18 +359,22 @@ impl RepositoryConfig {
             }
         } else {
             // Push everything found in the feature set
-            let feature_set = api.get_folder(name)?;
+            let feature_set = self.api.get_folder(name)?;
             let script_remote = format!("{}/scripts/", name);
 
             for entry in feature_set.content {
                 let script = entry.path.starts_with(&script_remote);
-                let file_path = to_local_path(&entry.path, script, &script_dir.to_string_lossy())?;
+                let file_path = to_local_path(
+                    &entry.path,
+                    script,
+                    &self.config.script_folder.to_string_lossy(),
+                )?;
                 if file_path.exists() {
-                    self.push_files(&api, &file_path, name, script, cmt_msg)?;
+                    self.push_files(&file_path, name, script, cmt_msg.as_deref())?;
                 }
             }
         }
-        Ok(())
+        Ok(format!("Files pushed to feature set {}", &name))
     }
 
     /// This function pulls files from the remote repository.
@@ -378,16 +384,14 @@ impl RepositoryConfig {
     /// the files are pulled from the remote repository and gets written to the
     /// local destination. It returns an error if some IO failure happens or
     /// the destination is not writable for the current user.
-    fn pull_files(
-        &self,
-        api: &GiteaClient,
-        files: &[ContentEntry],
-        script: bool,
-        script_dir: &PathBuf,
-    ) -> Result<()> {
+    fn pull_files(&self, files: &[ContentEntry], script: bool) -> Result<()> {
         for file in files {
-            let content = api.download_file(&file.path)?;
-            let path = to_local_path(&file.path, script, &script_dir.to_string_lossy())?;
+            let content = self.api.download_file(&file.path)?;
+            let path = to_local_path(
+                &file.path,
+                script,
+                &self.config.script_folder.to_string_lossy(),
+            )?;
             // If we have a regular config file, check if the parent folder exists and is writable
             if !script {
                 check_folder(&path)?;
@@ -421,18 +425,16 @@ impl RepositoryConfig {
     pub fn pull(
         &self,
         name: &str,
-        path: Option<&str>,
-        script_dir: &PathBuf,
+        path: Option<String>,
         script: bool,
         config: bool,
-    ) -> Result<()> {
-        let api = self.create_api_client()?;
-        if !self.check_feature_set_exists(&api, name)? {
+    ) -> Result<String> {
+        if !self.check_feature_set_exists(name)? {
             return Err(Error::Push(format!("No features set named {}", name)));
         }
-        check_folder(script_dir)?;
+        check_folder(&self.config.script_folder)?;
         let prefix = format!("{}/scripts", name);
-        let feature_set = api.get_folder(name)?;
+        let feature_set = self.api.get_folder(name)?;
 
         if script || config {
             let files = feature_set
@@ -446,20 +448,23 @@ impl RepositoryConfig {
                         !e.path.starts_with(&prefix)
                     }
                 })
-                .filter(|e| match path {
-                    Some(p) => e.path.ends_with(&p),
+                .filter(|e| match &path {
+                    Some(p) => e.path.ends_with(p.as_str()),
                     None => true,
                 })
                 .collect::<Vec<ContentEntry>>();
-            self.pull_files(&api, &files, script, script_dir)?;
+            self.pull_files(&files, script)?;
         } else {
             // Pull everything found in the feature set
             for file in feature_set.content {
                 let script = file.path.starts_with(&prefix);
-                self.pull_files(&api, &[file], script, script_dir)?;
+                self.pull_files(&[file], script)?;
             }
         }
-        Ok(())
+        Ok(format!(
+            "Successfully pulled files from feature set {}",
+            &name
+        ))
     }
 
     /// This function renames either feature sets or folder and files within the remote repository.
@@ -473,80 +478,418 @@ impl RepositoryConfig {
         &self,
         name: &str,
         new_name: &str,
-        _path: Option<&str>,
-        cmt_msg: Option<&str>,
-    ) -> Result<()> {
-        let api = self.create_api_client()?;
-        if !self.check_feature_set_exists(&api, name)? {
+        _path: Option<String>,
+        cmt_msg: Option<String>,
+    ) -> Result<String> {
+        if !self.check_feature_set_exists(name)? {
             return Err(Error::Push(format!("No features set named {}", name)));
         }
-        let feature_set = api.get_folder(name)?;
+        let feature_set = self.api.get_folder(name)?;
 
         self.new_feature_set(new_name, None)?;
         for file in feature_set.content {
-            let content = api.download_file(&file.path)?;
+            let content = self.api.download_file(&file.path)?;
             let base_path = file.path.strip_prefix(name).unwrap();
-            api.create_or_update_file(
+            self.api.create_or_update_file(
                 new_name,
                 &base_path,
                 content.as_bytes(),
-                &self.author,
-                &self.email,
-                cmt_msg,
+                &self.config.repo.author,
+                &self.config.repo.email,
+                cmt_msg.as_deref(),
             )?;
         }
         self.delete(name, None, false, true, cmt_msg)?;
-
-        // match path {
-        //     Some(p) => {
-        //         // Distinguish between script files and normal files by existence
-        //         let files = feature_set.content.into_iter().find(|e| e.path.ends_with(p));
-
-        //         // Fetch the folder or file
-        //         let files = api.get_folder(pbuf?.to_str().unwrap())?;
-        //         // Convert old path to new one
-        //         let new_path = match p.split_once("/") {
-        //             Some((_, path)) => format!("{}/{}", path, new_name),
-        //             None => new_name.into(),
-        //         };
-
-        //         for file in files.content {
-        //             let content = api.download_file(&file.path)?;
-
-        //             //let base_path = file.path;
-
-        //             api.create_or_update_file(
-        //                 name,
-        //                 &new_path,
-        //                 content.as_bytes(),
-        //                 &self.author,
-        //                 &self.email,
-        //                 cmt_msg,
-        //             )?;
-        //         }
-        //         self.delete(name, path, false, true, cmt_msg)?;
-        //     }
-        //     None => {
-        //         // Rename the feature set
-        //         self.new_feature_set(new_name, None)?;
-        //         for file in feature_set.content {
-        //             let content = api.download_file(&file.path)?;
-        //             let base_path = file.path.strip_prefix(name).unwrap();
-        //             api.create_or_update_file(
-        //                 new_name,
-        //                 &base_path,
-        //                 content.as_bytes(),
-        //                 &self.author,
-        //                 &self.email,
-        //                 cmt_msg,
-        //             )?;
-        //         }
-        //         self.delete(name, None, false, true, cmt_msg)?;
-        //     }
-        // }
-        Ok(())
+        Ok(format!(
+            "Successfully renamed files in feature set {}",
+            name
+        ))
     }
 }
+
+// impl RepositoryConfig {
+//     /// This function constructs a new Gitea API client for requests.
+//     fn create_api_client(&self) -> Result<GiteaClient> {
+//         GiteaClient::new(
+//             &self.url,
+//             Some(&self.api_token),
+//             None,
+//             &self.repository,
+//             &self.owner,
+//         )
+//         .map_err(Error::Api)
+//     }
+
+//     /// This function queries the remote repository root and
+//     /// returns a list of `ContentEntry` with `ContentType::Dir`.
+//     /// All directories in the root are considered as feature sets.
+//     fn get_feature_sets(&self, api: &GiteaClient) -> Result<ContentsResponse> {
+//         api.get_file_or_folder("", Some(ContentType::Dir))
+//             .map_err(Error::Api)
+//     }
+
+//     /// This function returns true if a certain folder in the remote repository root is found.
+//     fn check_feature_set_exists(&self, api: &GiteaClient, name: &str) -> Result<bool> {
+//         let content = self.get_feature_sets(&api)?.content;
+//         for e in content {
+//             if e.name == name {
+//                 return Ok(true);
+//             }
+//         }
+//         Ok(false)
+//     }
+
+//     /// This function prints informations about the remote instance and the
+//     /// used repository to the command line.
+//     pub fn info(&self) -> Result<()> {
+//         let api = self.create_api_client()?;
+//         let gitea_version = api.get_gitea_version()?;
+//         let repository = api.get_repository_information()?;
+//         println!("{}", gitea_version);
+//         println!("{}", repository);
+//         Ok(())
+//     }
+
+//     /// This function prints either the feature sets contained in the remote
+//     /// repository or if `name` is provided all files found in the feature set.
+//     pub fn list(&self, feature_set: Option<&str>) -> Result<()> {
+//         let api = self.create_api_client()?;
+//         match feature_set {
+//             Some(n) => {
+//                 let feature_set = api.get_folder(n)?;
+//                 println!("Feature Set: {}\n{}", n, feature_set);
+//             }
+//             None => {
+//                 let feature_sets = self.get_feature_sets(&api)?;
+//                 println!("Feature Sets:\n{}", feature_sets);
+//             }
+//         }
+//         Ok(())
+//     }
+
+//     /// This function creates a new feature set within the remote repositories root.
+//     ///
+//     /// Since git ignores empty folders, a standard way is used. The file empty
+//     /// `<featurename>/.gitkeep` is created instead.
+//     /// If the feature already exists nothing is returned and indicates success,
+//     /// Normaly the API returns the content entry for the created file but this is
+//     /// useless in this case. We only check the HTTP return code.
+//     pub fn new_feature_set(&self, feature_set: &str, cmt_msg: Option<&str>) -> Result<()> {
+//         let api = self.create_api_client()?;
+//         if !self.check_feature_set_exists(&api, feature_set)? {
+//             api.create_or_update_file(
+//                 feature_set,
+//                 "/.gitkeep",
+//                 "".as_bytes(),
+//                 &self.author,
+//                 &self.email,
+//                 cmt_msg,
+//             )?;
+//             api.create_or_update_file(
+//                 feature_set,
+//                 "/scripts/.gitkeep",
+//                 "".as_bytes(),
+//                 &self.author,
+//                 &self.email,
+//                 cmt_msg,
+//             )?;
+//         }
+//         Ok(())
+//     }
+
+//     /// This function tries to delete files from the remote repository.
+//     ///
+//     /// It takes the `name` of the feature set and optional a `path` to some file.
+//     /// It no path if provided the whole feature set is deleted. If some path is provided
+//     /// and `script` is set to true `path` shall point to a file name in the scripts folder
+//     /// of the feature set. Otherwise the function tries to delete a configuration file
+//     /// folder denoted by path.
+//     pub fn delete(
+//         &self,
+//         name: &str,
+//         path: Option<&str>,
+//         script: bool,
+//         recursive: bool,
+//         cmt_msg: Option<&str>,
+//     ) -> Result<()> {
+//         let api = self.create_api_client()?;
+//         match path {
+//             Some(path) if script => api.delete_file_or_folder(
+//                 &format!("{}/scripts/{}", name, path),
+//                 false,
+//                 &self.author,
+//                 &self.email,
+//                 cmt_msg,
+//             ),
+//             Some(path) => api.delete_file_or_folder(
+//                 &format!("{}/{}", name, path),
+//                 recursive,
+//                 &self.author,
+//                 &self.email,
+//                 cmt_msg,
+//             ),
+//             None => api.delete_file_or_folder(name, true, &self.author, &self.email, cmt_msg),
+//         }
+//         .map_err(Error::Api)
+//     }
+
+//     /// This function pushes files located in a `path` to the feature set in the remote repository.
+//     ///
+//     /// It distinguishes between script files and configuration files through the `script`
+//     /// argument. The existence of the `path` should be validated beforehand.
+//     fn push_files(
+//         &self,
+//         api: &GiteaClient,
+//         path: &PathBuf,
+//         // files: &[PathBuf],
+//         feature_set: &str,
+//         script: bool,
+//         cmt_msg: Option<&str>,
+//     ) -> Result<()> {
+//         let files = read_folder(&path)?;
+//         for file in files {
+//             let remote_path = to_remote_path(&file, script)?;
+//             let content = read_file(&file)?;
+//             api.create_or_update_file(
+//                 feature_set,
+//                 &remote_path,
+//                 &content,
+//                 &self.author,
+//                 &self.email,
+//                 cmt_msg,
+//             )?;
+//             println!(
+//                 "Pushed file {} into feature set {}",
+//                 remote_path, feature_set
+//             );
+//         }
+//         Ok(())
+//     }
+
+//     /// This function pushes files a feature set in the remote repository.
+//     ///
+//     /// If no path is provided this function fetches all files stored
+//     /// in the remote repository and tries to push a local version if found.
+//     /// Script files are searched in the provided `script_dir`.
+//     ///
+//     /// If some path is provided this function push the local file or folder.
+//     /// Folders are pushed recursively.
+//     pub fn push(
+//         &self,
+//         name: &str,
+//         script_dir: &PathBuf,
+//         path: Option<&str>,
+//         script: bool,
+//         cmt_msg: Option<&str>,
+//     ) -> Result<()> {
+//         let api = self.create_api_client()?;
+//         if !self.check_feature_set_exists(&api, name)? {
+//             return Err(Error::Push(format!("No features set named {}", name)));
+//         }
+
+//         if let Some(path) = path {
+//             // Push a config or script file or folder
+//             let path = PathBuf::from(path).canonicalize()?;
+//             if path.exists() {
+//                 self.push_files(&api, &path, name, script, cmt_msg)?;
+//             } else {
+//                 return Err(Error::Push(format!(
+//                     "File {} doesn't exists",
+//                     path.display()
+//                 )));
+//             }
+//         } else {
+//             // Push everything found in the feature set
+//             let feature_set = api.get_folder(name)?;
+//             let script_remote = format!("{}/scripts/", name);
+
+//             for entry in feature_set.content {
+//                 let script = entry.path.starts_with(&script_remote);
+//                 let file_path = to_local_path(&entry.path, script, &script_dir.to_string_lossy())?;
+//                 if file_path.exists() {
+//                     self.push_files(&api, &file_path, name, script, cmt_msg)?;
+//                 }
+//             }
+//         }
+//         Ok(())
+//     }
+
+//     /// This function pulls files from the remote repository.
+//     ///
+//     /// It takes a vector of `ContentEntry` converts the path to a local one
+//     /// depending on the `script` argument. Afterwards, if the path is writable
+//     /// the files are pulled from the remote repository and gets written to the
+//     /// local destination. It returns an error if some IO failure happens or
+//     /// the destination is not writable for the current user.
+//     fn pull_files(
+//         &self,
+//         api: &GiteaClient,
+//         files: &[ContentEntry],
+//         script: bool,
+//         script_dir: &PathBuf,
+//     ) -> Result<()> {
+//         for file in files {
+//             let content = api.download_file(&file.path)?;
+//             let path = to_local_path(&file.path, script, &script_dir.to_string_lossy())?;
+//             // If we have a regular config file, check if the parent folder exists and is writable
+//             if !script {
+//                 check_folder(&path)?;
+//             }
+
+//             let mut f = File::create(&path)?;
+//             f.write_all(content.as_bytes()).map_err(Error::Io)?;
+//             if script {
+//                 let mut perms = f.metadata()?.permissions();
+//                 perms.set_mode(0o751);
+//                 f.set_permissions(perms)?;
+//             }
+//             println!("Pulled file {}", path.display());
+//         }
+//         Ok(())
+//     }
+
+//     /// This function pulls files from the remote repository and stores them
+//     /// on the local machine depending on the remote path.
+//     ///
+//     /// For the provided feature set either the script files or configuration files
+//     /// are pulled depending on the `script` and `config` argument. If both are set
+//     /// to true only script files are pulled to the local machine.
+//     /// If both arguments are set to false everything if pulled from the feature set.
+//     ///
+//     /// ## Attention
+//     ///
+//     /// If `path` is provided `script` or `config` flag is set only files matching
+//     /// the path are pulled. This doesn't distinguishes between remote pathes with the same suffix.
+//     /// Meaning `/test` and `/example/test` are the same if only `test` is given as path.
+//     pub fn pull(
+//         &self,
+//         name: &str,
+//         path: Option<&str>,
+//         script_dir: &PathBuf,
+//         script: bool,
+//         config: bool,
+//     ) -> Result<()> {
+//         let api = self.create_api_client()?;
+//         if !self.check_feature_set_exists(&api, name)? {
+//             return Err(Error::Push(format!("No features set named {}", name)));
+//         }
+//         check_folder(script_dir)?;
+//         let prefix = format!("{}/scripts", name);
+//         let feature_set = api.get_folder(name)?;
+
+//         if script || config {
+//             let files = feature_set
+//                 .content
+//                 .into_iter()
+//                 .filter(|e| {
+//                     if script {
+//                         e.path.starts_with(&prefix)
+//                     } else {
+//                         // We do not distinguish further between the cases
+//                         !e.path.starts_with(&prefix)
+//                     }
+//                 })
+//                 .filter(|e| match path {
+//                     Some(p) => e.path.ends_with(&p),
+//                     None => true,
+//                 })
+//                 .collect::<Vec<ContentEntry>>();
+//             self.pull_files(&api, &files, script, script_dir)?;
+//         } else {
+//             // Pull everything found in the feature set
+//             for file in feature_set.content {
+//                 let script = file.path.starts_with(&prefix);
+//                 self.pull_files(&api, &[file], script, script_dir)?;
+//             }
+//         }
+//         Ok(())
+//     }
+
+//     /// This function renames either feature sets or folder and files within the remote repository.
+//     ///
+//     /// Provide the feature set `name` in which the files should be moved. If the `path` is
+//     /// empty the whole feature set is renamed. Otherwise, the `path` is resolved and the
+//     /// last part of the path (after `/`) is replaced with `new_name`.
+//     ///
+//     /// Script files can not be renamed.
+//     pub fn rename(
+//         &self,
+//         name: &str,
+//         new_name: &str,
+//         _path: Option<&str>,
+//         cmt_msg: Option<&str>,
+//     ) -> Result<()> {
+//         let api = self.create_api_client()?;
+//         if !self.check_feature_set_exists(&api, name)? {
+//             return Err(Error::Push(format!("No features set named {}", name)));
+//         }
+//         let feature_set = api.get_folder(name)?;
+
+//         self.new_feature_set(new_name, None)?;
+//         for file in feature_set.content {
+//             let content = api.download_file(&file.path)?;
+//             let base_path = file.path.strip_prefix(name).unwrap();
+//             api.create_or_update_file(
+//                 new_name,
+//                 &base_path,
+//                 content.as_bytes(),
+//                 &self.author,
+//                 &self.email,
+//                 cmt_msg,
+//             )?;
+//         }
+//         self.delete(name, None, false, true, cmt_msg)?;
+
+//         // match path {
+//         //     Some(p) => {
+//         //         // Distinguish between script files and normal files by existence
+//         //         let files = feature_set.content.into_iter().find(|e| e.path.ends_with(p));
+
+//         //         // Fetch the folder or file
+//         //         let files = api.get_folder(pbuf?.to_str().unwrap())?;
+//         //         // Convert old path to new one
+//         //         let new_path = match p.split_once("/") {
+//         //             Some((_, path)) => format!("{}/{}", path, new_name),
+//         //             None => new_name.into(),
+//         //         };
+
+//         //         for file in files.content {
+//         //             let content = api.download_file(&file.path)?;
+
+//         //             //let base_path = file.path;
+
+//         //             api.create_or_update_file(
+//         //                 name,
+//         //                 &new_path,
+//         //                 content.as_bytes(),
+//         //                 &self.author,
+//         //                 &self.email,
+//         //                 cmt_msg,
+//         //             )?;
+//         //         }
+//         //         self.delete(name, path, false, true, cmt_msg)?;
+//         //     }
+//         //     None => {
+//         //         // Rename the feature set
+//         //         self.new_feature_set(new_name, None)?;
+//         //         for file in feature_set.content {
+//         //             let content = api.download_file(&file.path)?;
+//         //             let base_path = file.path.strip_prefix(name).unwrap();
+//         //             api.create_or_update_file(
+//         //                 new_name,
+//         //                 &base_path,
+//         //                 content.as_bytes(),
+//         //                 &self.author,
+//         //                 &self.email,
+//         //                 cmt_msg,
+//         //             )?;
+//         //         }
+//         //         self.delete(name, None, false, true, cmt_msg)?;
+//         //     }
+//         // }
+//         Ok(())
+//     }
+// }
 
 /// Read a file denoted by a `PathBuf` into a `Vec<u8>` or return the io Error.
 fn read_file(path: &PathBuf) -> Result<Vec<u8>> {

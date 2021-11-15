@@ -24,7 +24,7 @@ extern crate toml;
 extern crate ureq;
 
 use argh::FromArgs;
-use rustea::RusteaConfiguration;
+use rustea::{RemoteRepository, RusteaConfiguration};
 use self_update::cargo_crate_version;
 use std::process::exit;
 
@@ -90,11 +90,7 @@ struct RusteaInit {
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "info")]
 /// Show informations about the remote repository or configuration.
-struct RusteaInfo {
-    /// print current configuration
-    #[argh(switch, short = 'p')]
-    print: bool,
-}
+struct RusteaInfo {}
 
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "list")]
@@ -206,6 +202,28 @@ fn update() -> Result<self_update::Status, Box<dyn::std::error::Error>> {
 
 fn main() {
     let rustea: Rustea = argh::from_env();
+
+    if let RusteaCmd::Init(ref init) = rustea.cmd {
+        match RusteaConfiguration::create_initial_configuration(
+            &init.url,
+            init.api_token.as_deref(),
+            init.token_name.as_deref(),
+            &init.repository,
+            &init.owner,
+        ) {
+            Ok(p) => {
+                println!(
+                    "Successfully initialized rustea. Configuration path {}",
+                    p.display()
+                );
+            }
+            Err(e) => {
+                eprintln!("Failed to initialize rustea.\nCause: {}", e);
+                exit(1)
+            }
+        }
+    }
+
     let config = match RusteaConfiguration::read_config_file(rustea.config.as_deref()) {
         Ok(c) => c,
         Err(e) => {
@@ -213,130 +231,50 @@ fn main() {
             exit(1)
         }
     };
+    let remote_repository = match RemoteRepository::new(config) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Could not create client for remote repository: {}", e);
+            exit(1)
+        }
+    };
 
-    match rustea.cmd {
-        RusteaCmd::Init(init) => {
-            match RusteaConfiguration::create_initial_configuration(
-                &init.url,
-                init.api_token.as_deref(),
-                init.token_name.as_deref(),
-                &init.repository,
-                &init.owner,
-            ) {
-                Ok(p) => {
-                    println!(
-                        "Successfully initialized rustea. Configuration path {}",
-                        p.display()
-                    );
-                }
-                Err(e) => {
-                    eprintln!("Failed to initialize rustea.\nCause: {}", e);
-                    exit(1)
-                }
-            }
-        }
-        RusteaCmd::Info(info) => {
-            if info.print {
-                println!("{}", config);
-            } else {
-                match config.repo.info() {
-                    Ok(_) => exit(0),
-                    Err(e) => println!("Can not fetch informations. Cause: {}", e),
-                }
-            }
-        }
-        RusteaCmd::List(list) => match config.repo.list(list.feature_set.as_deref()) {
-            Ok(_) => exit(0),
-            Err(e) => println!("Can not fetch informations. Cause: {}", e),
-        },
-        RusteaCmd::New(new) => {
-            match config
-                .repo
-                .new_feature_set(&new.feature_set, rustea.message.as_deref())
-            {
-                Ok(_) => exit(0),
-                Err(e) => println!("Can not fetch informations. Cause: {}", e),
-            }
-        }
-        RusteaCmd::Delete(delete) => {
-            match config.repo.delete(
-                &delete.feature_set,
-                delete.sub_path.as_deref(),
-                delete.script,
-                delete.recursive,
-                rustea.message.as_deref(),
-            ) {
-                Ok(_) => println!(
-                    "Successfully deleted {} from the feature set {}",
-                    delete.sub_path.unwrap_or_default(),
-                    delete.feature_set
-                ),
-                Err(e) => eprintln!(
-                    "Failed to delete {} from the feature set {}.\nCause: {}",
-                    delete.sub_path.unwrap_or_default(),
-                    delete.feature_set,
-                    e
-                ),
-            }
-        }
+    let res = match rustea.cmd {
+        RusteaCmd::Init(_) => Ok("Already initialized".to_string()),
+        RusteaCmd::Info(_) => Ok(format!("{}", remote_repository)),
+        RusteaCmd::List(list) => remote_repository.list(list.feature_set),
+        RusteaCmd::New(new) => remote_repository.new_feature_set(&new.feature_set, rustea.message),
+        RusteaCmd::Delete(delete) => remote_repository.delete(
+            &delete.feature_set,
+            delete.sub_path,
+            delete.script,
+            delete.recursive,
+            rustea.message,
+        ),
         RusteaCmd::Pull(pull) => {
-            match config.repo.pull(
-                &pull.feature_set,
-                pull.sub_path.as_deref(),
-                &config.script_folder,
-                pull.script,
-                pull.config,
-            ) {
-                Ok(_) => println!(
-                    "Successully pulled files from feature set {}",
-                    pull.feature_set
-                ),
-                Err(e) => eprintln!(
-                    "Failed to pull files from feature set {}. Cause {}",
-                    pull.feature_set, e
-                ),
-            }
+            remote_repository.pull(&pull.feature_set, pull.sub_path, pull.script, pull.config)
         }
-        RusteaCmd::Push(push) => {
-            match config.repo.push(
-                &push.feature_set,
-                &config.script_folder,
-                push.sub_path.as_deref(),
-                push.script,
-                rustea.message.as_deref(),
-            ) {
-                Ok(_) => println!(
-                    "Successfully pushed files to feature set {}",
-                    push.feature_set
-                ),
-                Err(e) => eprintln!(
-                    "Failed to push files to feature set {}. Cause {}",
-                    push.feature_set, e
-                ),
-            }
-        }
-        RusteaCmd::Rename(rename) => {
-            match config.repo.rename(
-                &rename.feature_set,
-                &rename.new_name,
-                rename.path.as_deref(),
-                rustea.message.as_deref(),
-            ) {
-                Ok(_) => println!("Successfully renamed files."),
+        RusteaCmd::Push(push) => remote_repository.push(
+            &push.feature_set,
+            push.sub_path,
+            push.script,
+            rustea.message,
+        ),
+        RusteaCmd::Rename(rename) => remote_repository.rename(
+            &rename.feature_set,
+            &rename.new_name,
+            rename.path,
+            rustea.message,
+        ),
+        RusteaCmd::Update(_) => todo!(),
+    };
 
-                Err(e) => eprintln!("Failed to rename files. Error: {}", e),
-            }
+    match res {
+        Ok(s) => println!("{}", s),
+        Err(e) => {
+            eprintln!("{}", e);
+            exit(1)
         }
-        RusteaCmd::Update(_) => match update() {
-            Ok(status) => println!(
-                "Updated successfully, running new version {}",
-                status.version()
-            ),
-            Err(e) => {
-                eprintln!("Update failed with reason: {}", e);
-                exit(1)
-            }
-        },
     }
     exit(0);
 }
