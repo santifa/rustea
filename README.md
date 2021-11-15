@@ -1,9 +1,9 @@
 # rustea
 
 `rustea` is a small cli tool for handling configuration and script files. Thus, it shall be simple
-to pull or deploy configurations directly from a Gitea instance or push configurations to it.
-It doesn't aim to replace full-fledged configuration management system. If your looking
-for such an approach use a tool like Ansible or Chef or something else like that.
+to pull or push configurations directly from a Gitea instance. It doesn't aim to replace full-fledged
+configuration management system. If your looking for such an approach use a tool like Ansible 
+or Chef or something else like that.
 
 ## Overview
 
@@ -12,13 +12,23 @@ or pulled to the local machine and copied to the correct place. It distinguishes
 files and __script files__ which are simply executable files stored in a special location.
 As a remote store for the files a Gitea server with an enabled API is used.
 
+**Semantics***  
+`rustea` uses the following semantics:  
+  * **Remote repository**: The main git repository hosted on a gitea instance running anywhere which is
+  accessible via its API. `rustea` only access one remote repository at a time.
+  * **Feature set**: A remote repository contains multiple feature sets which can provide different configuration
+  or script files.
+  * **Pull**: Describes the action of downloading configuration and/or script files from a feature set
+  and store them on the local machine.
+  * **Push**: Describes the action of uploading local configuration and/or script files to a feature set in
+  the remote repository.
+
 #### Non-Goals
 
   * compete with full-fledged configuration management systems
   * regular update of operating systems and distribution packages
   * repair broken configurations
   * Branches and in deepth Gitea or Git Features (maybe on request)
-  * No authentication is used
 
 ### Why?
 
@@ -74,7 +84,8 @@ The following list gives some assumptions while developing `rustea`:
 An example for the main configuration which is stored under `~/.rustea.toml`:
 
     script_folder = '/etc/local/bin' <-- Local folder for script files
-    
+    exclude = '.git' <-- Files an folders excluded
+
     [repo]
     url = 'https://git.rtzptz.xyz' <-- Base url to the gitea instance without trailing /
     repository = 'rustea-devops' <-- Repository name
@@ -112,8 +123,8 @@ Afterwards, you can either create the `~/.rustea.toml` by yourself or run `ruste
   * [x] Link-time Optimization with `lto = true`
   * [x] Reduce parallel code building with `codegen-units = 1`
   * [x] Abort on panic instead of unwind the stack with `panic = 'abort'`
-  * [ ] Use xargo for `std`
-  * [ ] Remove `libstd`
+  * [ ] Use xargo for `std`?
+  * [ ] Remove `libstd`?
   * [x] Strip symbols with `cargo-strip` 
   * [x] Compress the binary with upx
 

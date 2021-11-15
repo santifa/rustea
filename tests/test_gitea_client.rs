@@ -4,7 +4,7 @@
 use rustea::gitea::GiteaClient;
 
 fn load_dev_conf() -> GiteaClient {
-    let conf = rustea::Configuration::read_config_file(Some("rustea.toml")).unwrap();
+    let conf = rustea::RusteaConfiguration::read_config_file(Some("rustea.toml")).unwrap();
     GiteaClient::new(
         &conf.repo.url,
         Some(&conf.repo.api_token),

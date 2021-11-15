@@ -2,6 +2,8 @@
 //!
 //! It implements the heavy lifting for the main binary.
 
+pub mod error;
+pub mod gitea;
 /// rustea is a small cli tool to interact with git repositories hosted
 /// by Gitea Instances. Copyright (C) 2021  Henrik Jürges (juerges.henrik@gmail.com)
 ///
@@ -17,9 +19,8 @@
 ///
 /// You should have received a copy of the GNU General Public License
 /// along with this program. If not, see <https://www.gnu.org/licenses/>.
-pub mod gitea;
-
 use core::fmt;
+use error::Error;
 use faccess::PathExt;
 use gitea::{
     gitea_api::{self, ContentEntry, ContentsResponse},
@@ -42,76 +43,6 @@ use crate::gitea::gitea_api::ContentType;
 /// A `Result` alias where the `Err` case is `rustea::Error`.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// The error type of rustea. It catches either errors from
-/// API calls and wraps `gitea_api::Error` or from configuration and
-/// file operations.
-#[derive(Debug)]
-pub enum Error {
-    ApiError(gitea_api::ApiError),
-    IoError(io::Error),
-    WriteConfiguration(toml::ser::Error),
-    ReadConfiguration(toml::de::Error),
-    Push(String),
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match *self {
-            Error::ApiError(ref c) => Some(c),
-            Error::IoError(ref c) => Some(c),
-            Error::WriteConfiguration(_) => None,
-            Error::ReadConfiguration(_) => None,
-            Error::Push(_) => None,
-        }
-    }
-
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        match *self {
-            Error::ApiError(ref c) => Some(c),
-            Error::IoError(ref c) => Some(c),
-            Error::WriteConfiguration(_) => None,
-            Error::ReadConfiguration(_) => None,
-            Error::Push(_) => None,
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::ApiError(e) => write!(f, "Gitea api error: {}", e),
-            Error::IoError(e) => write!(f, "IO Error: {}", e),
-            Error::WriteConfiguration(e) => write!(f, "Configuration write error: {}", e),
-            Error::ReadConfiguration(e) => write!(f, "Configuration read error: {}", e),
-            Error::Push(e) => write!(f, "Error pushing configuration: {}", e),
-        }
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self {
-        Error::IoError(err)
-    }
-}
-
-impl From<gitea_api::ApiError> for Error {
-    fn from(err: gitea_api::ApiError) -> Self {
-        Error::ApiError(err)
-    }
-}
-
-impl From<toml::ser::Error> for Error {
-    fn from(err: toml::ser::Error) -> Self {
-        Error::WriteConfiguration(err)
-    }
-}
-
-impl From<toml::de::Error> for Error {
-    fn from(err: toml::de::Error) -> Self {
-        Error::ReadConfiguration(err)
-    }
-}
-
 /// The version of rustea
 pub const VERSION: &str = "0.1.3";
 
@@ -125,34 +56,34 @@ pub fn get_default_path() -> Result<String> {
             let home = String::from(val.to_str().unwrap());
             Ok(home + "/" + DEFAULT_CONF_NAME)
         }
-        None => panic!("Could not find home"),
+        None => Err(Error::Configuration(error::ConfigError::LocationError)),
     }
 }
 
 /// The main configuration is serialized by the toml library.
 #[derive(Debug, Default, Deserialize, Serialize)]
-pub struct Configuration {
-    pub script_folder: String,
-    pub repo: RemoteRepository,
+pub struct RusteaConfiguration {
+    pub script_folder: PathBuf,
+    pub exclude: String,
+    pub repo: RepositoryConfig,
 }
 
-impl Display for Configuration {
+impl Display for RusteaConfiguration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let p = PathBuf::from(&self.script_folder).canonicalize();
-
         write!(
             f,
-            "Using rustea version {}\nscript_folder = {}\nrepo = {{\n{}\n}}",
+            "Using rustea version {}\nscript_folder = {}\nexclude= {}\nrepo = {{\n{}\n}}",
             VERSION,
-            p.unwrap().display(),
+            self.script_folder.canonicalize().unwrap().display(),
+            self.exclude,
             self.repo
         )
     }
 }
 
-impl Configuration {
+impl RusteaConfiguration {
     /// This function tries to read and convert the file provided as `PathBuf` into a new `Configuration`.
-    pub fn read_config_file(path: Option<&str>) -> Result<Configuration> {
+    pub fn read_config_file(path: Option<&str>) -> Result<RusteaConfiguration> {
         let path = PathBuf::from(path.unwrap_or(&get_default_path()?));
         let mut config_string = String::new();
         File::open(path).and_then(|mut file| file.read_to_string(&mut config_string))?;
@@ -164,8 +95,7 @@ impl Configuration {
         // toml::to_string_pretty(self).and_then(|c| write_file(&c, file_path))
         let conf_string = toml::to_string_pretty(self)?;
         let mut file = File::create(file_path)?;
-        file.write_all(conf_string.as_bytes())
-            .map_err(Error::IoError)
+        file.write_all(conf_string.as_bytes()).map_err(Error::Io)
     }
 
     /// This function creates a new rustea configuration and stores it
@@ -179,9 +109,10 @@ impl Configuration {
         owner: &str,
     ) -> Result<PathBuf> {
         let client = GiteaClient::new(url, api_token, token_name, repository, owner)?;
-        let conf = Configuration {
-            script_folder: "/usr/local/bin".to_owned(),
-            repo: RemoteRepository {
+        let conf = RusteaConfiguration {
+            script_folder: PathBuf::from("/usr/local/bin"),
+            exclude: ".git".to_owned(),
+            repo: RepositoryConfig {
                 url: client.url,
                 api_token: client.api_token,
                 repository: client.repository,
@@ -199,7 +130,7 @@ impl Configuration {
 /// This struct defines the access to the remote repository
 /// which contains the features sets used by rustea.
 #[derive(Debug, Default, Deserialize, Serialize)]
-pub struct RemoteRepository {
+pub struct RepositoryConfig {
     pub url: String,
     pub api_token: String,
     pub repository: String,
@@ -208,7 +139,7 @@ pub struct RemoteRepository {
     pub author: String,
 }
 
-impl Display for RemoteRepository {
+impl Display for RepositoryConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut tw = TabWriter::new(vec![]);
 
@@ -229,7 +160,11 @@ impl Display for RemoteRepository {
     }
 }
 
-impl RemoteRepository {
+struct RemoteRepository {
+    config: RusteaConfiguration,
+}
+
+impl RepositoryConfig {
     /// This function constructs a new Gitea API client for requests.
     fn create_api_client(&self) -> Result<GiteaClient> {
         GiteaClient::new(
@@ -239,7 +174,7 @@ impl RemoteRepository {
             &self.repository,
             &self.owner,
         )
-        .map_err(Error::ApiError)
+        .map_err(Error::Api)
     }
 
     /// This function queries the remote repository root and
@@ -247,7 +182,7 @@ impl RemoteRepository {
     /// All directories in the root are considered as feature sets.
     fn get_feature_sets(&self, api: &GiteaClient) -> Result<ContentsResponse> {
         api.get_file_or_folder("", Some(ContentType::Dir))
-            .map_err(Error::ApiError)
+            .map_err(Error::Api)
     }
 
     /// This function returns true if a certain folder in the remote repository root is found.
@@ -352,7 +287,7 @@ impl RemoteRepository {
             ),
             None => api.delete_file_or_folder(name, true, &self.author, &self.email, cmt_msg),
         }
-        .map_err(Error::ApiError)
+        .map_err(Error::Api)
     }
 
     /// This function pushes files located in a `path` to the feature set in the remote repository.
@@ -399,7 +334,7 @@ impl RemoteRepository {
     pub fn push(
         &self,
         name: &str,
-        script_dir: &str,
+        script_dir: &PathBuf,
         path: Option<&str>,
         script: bool,
         cmt_msg: Option<&str>,
@@ -427,7 +362,7 @@ impl RemoteRepository {
 
             for entry in feature_set.content {
                 let script = entry.path.starts_with(&script_remote);
-                let file_path = to_local_path(&entry.path, script, script_dir)?;
+                let file_path = to_local_path(&entry.path, script, &script_dir.to_string_lossy())?;
                 if file_path.exists() {
                     self.push_files(&api, &file_path, name, script, cmt_msg)?;
                 }
@@ -448,18 +383,18 @@ impl RemoteRepository {
         api: &GiteaClient,
         files: &[ContentEntry],
         script: bool,
-        script_dir: &str,
+        script_dir: &PathBuf,
     ) -> Result<()> {
         for file in files {
             let content = api.download_file(&file.path)?;
-            let path = to_local_path(&file.path, script, script_dir)?;
+            let path = to_local_path(&file.path, script, &script_dir.to_string_lossy())?;
             // If we have a regular config file, check if the parent folder exists and is writable
             if !script {
-                check_folder(&path.parent().unwrap().to_string_lossy())?;
+                check_folder(&path)?;
             }
 
             let mut f = File::create(&path)?;
-            f.write_all(content.as_bytes()).map_err(Error::IoError)?;
+            f.write_all(content.as_bytes()).map_err(Error::Io)?;
             if script {
                 let mut perms = f.metadata()?.permissions();
                 perms.set_mode(0o751);
@@ -487,7 +422,7 @@ impl RemoteRepository {
         &self,
         name: &str,
         path: Option<&str>,
-        script_dir: &str,
+        script_dir: &PathBuf,
         script: bool,
         config: bool,
     ) -> Result<()> {
@@ -684,15 +619,15 @@ fn to_local_path(remote_path: &str, script: bool, script_dir: &str) -> Result<Pa
 
 /// This function takes a folder path and creates the path if it
 /// not exists and checks if the path is writable afterwards.
-fn check_folder(dir: &str) -> Result<()> {
-    let path = PathBuf::from(dir);
+fn check_folder(path: &PathBuf) -> Result<()> {
+    // let path = PathBuf::from(dir);
     if !path.exists() {
         fs::DirBuilder::new().recursive(true).create(&path)?;
     }
     if !path.writable() {
         return Err(Error::Push(format!(
             "Path {} not writable. Do you need to be root?",
-            dir
+            path.display()
         )));
     }
     Ok(())

@@ -1,3 +1,4 @@
+extern crate argh;
 /// rustea is a small cli tool to interact with git repositories hosted
 /// by Gitea Instances. Copyright (C) 2021  Henrik Jürges (juerges.henrik@gmail.com)
 ///
@@ -13,8 +14,6 @@
 ///
 /// You should have received a copy of the GNU General Public License
 /// along with this program. If not, see <https://www.gnu.org/licenses/>.
-#[macro_use]
-extern crate clap;
 extern crate base64;
 extern crate faccess;
 extern crate self_update;
@@ -24,63 +23,176 @@ extern crate tabwriter;
 extern crate toml;
 extern crate ureq;
 
-use clap::App;
-use rustea::Configuration;
+use argh::FromArgs;
+use rustea::RusteaConfiguration;
 use self_update::cargo_crate_version;
 use std::process::exit;
 
-// Create the rustea cli
-fn app() -> App<'static, 'static> {
-    clap_app!(
-        rustea =>
-            (version: "0.1.3")
-            (author: "Henrik Jürges <juerges.henrik@gmail.com")
-            (about: "A small utility for fetching configurations from gitea.")
-            (@arg CONFIG: -c --config +takes_value "Set a custom configuration file")
-            (@arg PRINT: -p --print "Print current configuration")
-            (@arg CMT_MSG: -m --message +takes_value "Provide a commit message for new, delete, rename and push.")
-            (@arg UPDATE: -u --update "Run the self-updater")
-            (@subcommand init =>
-             (about: "Create a new configuration for rustea.")
-             (@arg URL: +required "The base url to the gitea instance without the trailing slash.")
-             (@arg REPOSITORY: +required "The repository name")
-             (@arg OWNER: +required "The repository owner")
-             (@arg API_TOKEN: --token +takes_value "Provide the api token for gitea")
-             (@arg TOKEN_NAME: --name +takes_value "Provide a name for the api token"))
-            (@subcommand info =>
-             (about: "Show informations about and gitea and the configuration repository."))
-            (@subcommand list =>
-             (about: "Show the feature sets stored in the repository.")
-             (@arg FEATURE: "List the content of a feature set."))
-            (@subcommand new =>
-             (about: "Create a new empty feature set in the devops repository.")
-             (@arg NAME: +required "Name of the feature set"))
-            (@subcommand delete =>
-             (about: "Delete a feature set or a part of it")
-             (@arg RECURSIVE: -r --recursive "Delete a remote folder recursively")
-             (@arg SCRIPT: -s --script "Delete a script file from a feature set")
-             (@arg NAME: +required "Name of the feature set")
-             (@arg PATH: "Path to the configuration files"))
-            (@subcommand pull =>
-             (about: "Deploy a feature set from the devops repository.")
-             (@arg SCRIPT: -s --script "Deploy only the script files of a feature set")
-             (@arg CONFIG: -c --config "Deploy only the configuration files of a feature set")
-             (@arg NAME: +required "Name of the feature set to pull")
-             (@arg PATH: "Path to a file or folder from the feature set"))
-            (@subcommand push =>
-             (about: "Push a feature set to the devops repository.")
-             (@arg SCRIPT: -s --script "Push a script file or folder to the devops repository.")
-             (@arg NAME: +required "Name of the feature set to push")
-             (@arg PATH: "Path to the config or script file or folder"))
-            (@subcommand rename =>
-             (about: "Rename a file or folder within a feature set or a feature set if no path is given.")
-             (@arg NAME: +required "Name of the feature set")
-             (@arg NEW_NAME: +required "New name of the file, folder or feature set")
-             (@arg PATH: -p --path +takes_value "Path to file or folder which should be renamed"))
-    )
+#[derive(FromArgs, PartialEq, Debug)]
+/// A simple gitea based configuration management.
+struct Rustea {
+    /// provide a custom configuration file
+    #[argh(option, short = 'c')]
+    config: Option<String>,
+
+    /// a commit message used for changing the remote repository
+    #[argh(option, short = 'm')]
+    message: Option<String>,
+
+    #[argh(subcommand)]
+    cmd: RusteaCmd,
 }
 
-fn update() -> Result<(), Box<dyn::std::error::Error>> {
+#[derive(FromArgs, PartialEq, Debug)]
+#[argh(subcommand)]
+enum RusteaCmd {
+    Init(RusteaInit),
+    Info(RusteaInfo),
+    List(RusteaList),
+    New(RusteaNew),
+    Delete(RusteaDelete),
+    Pull(RusteaPull),
+    Push(RusteaPush),
+    Rename(RusteaRename),
+    Update(RusteaUpdate),
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+#[argh(subcommand, name = "update")]
+/// Run the rustea self-updater.
+struct RusteaUpdate {}
+
+#[derive(FromArgs, PartialEq, Debug)]
+#[argh(subcommand, name = "init")]
+/// Create a new configuration for rustea.
+struct RusteaInit {
+    /// provide an api token for the remote repository
+    #[argh(option, short = 't')]
+    api_token: Option<String>,
+
+    /// provide a name for the api token
+    #[argh(option, short = 'n')]
+    token_name: Option<String>,
+
+    /// the base url for the gitea instance without trailing slash
+    #[argh(positional)]
+    url: String,
+
+    /// the name of the remote repository
+    #[argh(positional)]
+    repository: String,
+
+    /// the owner of the remote repository
+    #[argh(positional)]
+    owner: String,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+#[argh(subcommand, name = "info")]
+/// Show informations about the remote repository or configuration.
+struct RusteaInfo {
+    /// print current configuration
+    #[argh(switch, short = 'p')]
+    print: bool,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+#[argh(subcommand, name = "list")]
+/// Show feature sets stores in the remote repository
+/// or files stored in a feature set.
+struct RusteaList {
+    /// optional feature set name for content listing
+    #[argh(positional)]
+    feature_set: Option<String>,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+#[argh(subcommand, name = "new")]
+/// Create a new feature set in the remote repository
+struct RusteaNew {
+    /// the name of the feature set
+    #[argh(positional)]
+    feature_set: String,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+#[argh(subcommand, name = "delete")]
+/// Delete a feature set or folders or files within the feature set
+struct RusteaDelete {
+    /// delete from path recursively
+    #[argh(switch, short = 'r')]
+    recursive: bool,
+
+    /// delete a script file
+    #[argh(switch, short = 's')]
+    script: bool,
+
+    /// the name of the feature set
+    #[argh(positional)]
+    feature_set: String,
+
+    /// the path to a subfolder or file of the feature set
+    #[argh(positional)]
+    sub_path: Option<String>,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+#[argh(subcommand, name = "pull")]
+/// Pull a feature set or only the configuration/script files on the local machine.
+struct RusteaPull {
+    /// deploy only script files
+    #[argh(switch, short = 's')]
+    script: bool,
+
+    /// deploy only configuration files
+    #[argh(switch, short = 'c')]
+    config: bool,
+
+    /// the name of the feature set
+    #[argh(positional)]
+    feature_set: String,
+
+    /// the path to a subfolder or file of the feature set
+    #[argh(positional)]
+    sub_path: Option<String>,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+#[argh(subcommand, name = "push")]
+/// Push configuration files or script files to a feature set.
+struct RusteaPush {
+    /// push a local file to the feature set script folder
+    #[argh(switch, short = 's')]
+    script: bool,
+
+    /// the name of the feature set
+    #[argh(positional)]
+    feature_set: String,
+
+    /// the path to a subfolder or file of the feature set
+    #[argh(positional)]
+    sub_path: Option<String>,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+#[argh(subcommand, name = "rename")]
+/// Rename in the remote repository a feature set or folders and files in a feature set.
+struct RusteaRename {
+    /// the path to a subfolder or file of the feature set
+    #[argh(option, short = 'p')]
+    path: Option<String>,
+
+    /// the name of the feature set
+    #[argh(positional)]
+    feature_set: String,
+
+    /// the new name of the feature set or folder or file
+    #[argh(positional)]
+    new_name: String,
+}
+
+/// Run the rustea self-updater
+fn update() -> Result<self_update::Status, Box<dyn::std::error::Error>> {
     let status = self_update::backends::github::Update::configure()
         .repo_owner("santifa")
         .repo_name("rustea")
@@ -89,179 +201,142 @@ fn update() -> Result<(), Box<dyn::std::error::Error>> {
         .current_version(cargo_crate_version!())
         .build()?
         .update()?;
-    println!("Update status: `{}`!", status.version());
-    Ok(())
+    Ok(status)
 }
 
 fn main() {
-    let matches = app().get_matches();
-
-    // Print either the default configuration or from the file provided.
-    // This is just for convience.
-    if matches.is_present("PRINT") {
-        let conf = Configuration::read_config_file(matches.value_of("CONFIG"));
-        match conf {
-            Ok(c) => {
-                println!("{}", c);
-                exit(0)
-            }
-            Err(e) => {
-                eprintln!("Configuration file not found. Run rustea init --token rustea-devops <repository name> <owner>\nError: {}", e);
-                exit(1)
-            }
-        }
-    }
-
-    if matches.is_present("UPDATE") {
-        match update() {
-            Ok(()) => {
-                println!("Successfully Updated");
-                exit(0)
-            }
-            Err(e) => {
-                eprintln!("Update failed: Reason {}", e);
-                exit(1)
-            }
-        }
-    }
-
-    let cmt_msg = matches.value_of("CMT_MSG");
-
-    // We shall evaluate this subcommand before loading the configuration file
-    if let Some(sub) = matches.subcommand_matches("init") {
-        match Configuration::create_initial_configuration(
-            &sub.value_of("URL").unwrap(),
-            sub.value_of("API_TOKEN"),
-            sub.value_of("TOKEN_NAME"),
-            &sub.value_of("REPOSITORY").unwrap(),
-            &sub.value_of("OWNER").unwrap(),
-        ) {
-            Ok(p) => {
-                println!(
-                    "Successfully initialized rustea. Configuration path {}",
-                    p.display()
-                );
-                exit(0)
-            }
-            Err(e) => {
-                eprintln!("Failed to initialize rustea.\nCause: {}", e);
-                exit(1)
-            }
-        }
-    }
-
-    // Now we can safely load the configuration file
-    let conf = match Configuration::read_config_file(matches.value_of("CONFIG")) {
+    let rustea: Rustea = argh::from_env();
+    let config = match RusteaConfiguration::read_config_file(rustea.config.as_deref()) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Error parsing configuration file: {}", e);
+            eprintln!("Configuration file not found. Run rustea init --token rustea-devops <repository name> <owner>\nError: {}", e);
             exit(1)
         }
     };
 
-    // Check which subcommand was used
-    match matches.subcommand_name() {
-        Some("info") => match conf.repo.info() {
+    match rustea.cmd {
+        RusteaCmd::Init(init) => {
+            match RusteaConfiguration::create_initial_configuration(
+                &init.url,
+                init.api_token.as_deref(),
+                init.token_name.as_deref(),
+                &init.repository,
+                &init.owner,
+            ) {
+                Ok(p) => {
+                    println!(
+                        "Successfully initialized rustea. Configuration path {}",
+                        p.display()
+                    );
+                }
+                Err(e) => {
+                    eprintln!("Failed to initialize rustea.\nCause: {}", e);
+                    exit(1)
+                }
+            }
+        }
+        RusteaCmd::Info(info) => {
+            if info.print {
+                println!("{}", config);
+            } else {
+                match config.repo.info() {
+                    Ok(_) => exit(0),
+                    Err(e) => println!("Can not fetch informations. Cause: {}", e),
+                }
+            }
+        }
+        RusteaCmd::List(list) => match config.repo.list(list.feature_set.as_deref()) {
             Ok(_) => exit(0),
             Err(e) => println!("Can not fetch informations. Cause: {}", e),
         },
-        Some("list") => {
-            let sub = matches.subcommand_matches("list").unwrap();
-            match conf.repo.list(sub.value_of("FEATURE")) {
-                Ok(_) => exit(0),
-                Err(e) => println!("Can not fetch informations. Cause: {}", e),
-            }
-        }
-        Some("new") => {
-            let sub = matches.subcommand_matches("new").unwrap();
-            match conf
+        RusteaCmd::New(new) => {
+            match config
                 .repo
-                .new_feature_set(sub.value_of("NAME").unwrap(), cmt_msg)
+                .new_feature_set(&new.feature_set, rustea.message.as_deref())
             {
                 Ok(_) => exit(0),
                 Err(e) => println!("Can not fetch informations. Cause: {}", e),
             }
         }
-        Some("delete") => {
-            let sub = matches.subcommand_matches("delete").unwrap();
-            match conf.repo.delete(
-                sub.value_of("NAME").unwrap(),
-                sub.value_of("PATH"),
-                sub.is_present("SCRIPT"),
-                sub.is_present("RECURSIVE"),
-                cmt_msg,
+        RusteaCmd::Delete(delete) => {
+            match config.repo.delete(
+                &delete.feature_set,
+                delete.sub_path.as_deref(),
+                delete.script,
+                delete.recursive,
+                rustea.message.as_deref(),
             ) {
                 Ok(_) => println!(
                     "Successfully deleted {} from the feature set {}",
-                    sub.value_of("PATH").unwrap(),
-                    sub.value_of("NAME").unwrap()
+                    delete.sub_path.unwrap_or_default(),
+                    delete.feature_set
                 ),
                 Err(e) => eprintln!(
                     "Failed to delete {} from the feature set {}.\nCause: {}",
-                    sub.value_of("PATH").unwrap(),
-                    sub.value_of("NAME").unwrap(),
+                    delete.sub_path.unwrap_or_default(),
+                    delete.feature_set,
                     e
                 ),
             }
         }
-        Some("pull") => {
-            let sub = matches.subcommand_matches("pull").unwrap();
-            match conf.repo.pull(
-                sub.value_of("NAME").unwrap(),
-                sub.value_of("PATH"),
-                &conf.script_folder,
-                sub.is_present("SCRIPT"),
-                sub.is_present("CONFIG"),
+        RusteaCmd::Pull(pull) => {
+            match config.repo.pull(
+                &pull.feature_set,
+                pull.sub_path.as_deref(),
+                &config.script_folder,
+                pull.script,
+                pull.config,
             ) {
                 Ok(_) => println!(
                     "Successully pulled files from feature set {}",
-                    sub.value_of("NAME").unwrap()
+                    pull.feature_set
                 ),
                 Err(e) => eprintln!(
                     "Failed to pull files from feature set {}. Cause {}",
-                    sub.value_of("NAME").unwrap(),
-                    e
+                    pull.feature_set, e
                 ),
             }
         }
-        Some("push") => {
-            let sub = matches.subcommand_matches("push").unwrap();
-            match conf.repo.push(
-                sub.value_of("NAME").unwrap(),
-                &conf.script_folder,
-                sub.value_of("PATH"),
-                sub.is_present("SCRIPT"),
-                cmt_msg,
+        RusteaCmd::Push(push) => {
+            match config.repo.push(
+                &push.feature_set,
+                &config.script_folder,
+                push.sub_path.as_deref(),
+                push.script,
+                rustea.message.as_deref(),
             ) {
                 Ok(_) => println!(
                     "Successfully pushed files to feature set {}",
-                    sub.value_of("NAME").unwrap()
+                    push.feature_set
                 ),
                 Err(e) => eprintln!(
                     "Failed to push files to feature set {}. Cause {}",
-                    sub.value_of("NAME").unwrap(),
-                    e
+                    push.feature_set, e
                 ),
             }
         }
-        Some("rename") => {
-            let sub = matches.subcommand_matches("rename").unwrap();
-            match conf.repo.rename(
-                sub.value_of("NAME").unwrap(),
-                sub.value_of("NEW_NAME").unwrap(),
-                sub.value_of("PATH"),
-                cmt_msg,
+        RusteaCmd::Rename(rename) => {
+            match config.repo.rename(
+                &rename.feature_set,
+                &rename.new_name,
+                rename.path.as_deref(),
+                rustea.message.as_deref(),
             ) {
                 Ok(_) => println!("Successfully renamed files."),
 
                 Err(e) => eprintln!("Failed to rename files. Error: {}", e),
             }
         }
-        _ => {
-            // We have no valid subcommand, but normaly clap checks this case
-            println!("Subcommand not found.\n{}", matches.usage());
-            exit(1);
-        }
+        RusteaCmd::Update(_) => match update() {
+            Ok(status) => println!(
+                "Updated successfully, running new version {}",
+                status.version()
+            ),
+            Err(e) => {
+                eprintln!("Update failed with reason: {}", e);
+                exit(1)
+            }
+        },
     }
     exit(0);
 }
