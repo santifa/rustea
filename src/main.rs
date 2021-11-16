@@ -25,8 +25,10 @@ extern crate ureq;
 
 use argh::FromArgs;
 use rustea::{RemoteRepository, RusteaConfiguration};
-use self_update::cargo_crate_version;
+// use self_update::cargo_crate_version;
 use std::process::exit;
+
+mod updater;
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// A simple gitea based configuration management.
@@ -60,7 +62,11 @@ enum RusteaCmd {
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "update")]
 /// Run the rustea self-updater.
-struct RusteaUpdate {}
+struct RusteaUpdate {
+    /// fetch the minified version of rustea
+    #[argh(switch, short = 'm')]
+    minified: bool,
+}
 
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "init")]
@@ -188,17 +194,17 @@ struct RusteaRename {
 }
 
 /// Run the rustea self-updater
-fn update() -> Result<self_update::Status, Box<dyn::std::error::Error>> {
-    let status = self_update::backends::github::Update::configure()
-        .repo_owner("santifa")
-        .repo_name("rustea")
-        .bin_name("github")
-        .show_download_progress(true)
-        .current_version(cargo_crate_version!())
-        .build()?
-        .update()?;
-    Ok(status)
-}
+// fn update() -> Result<self_update::Status, Box<dyn::std::error::Error>> {
+//     let status = self_update::backends::github::Update::configure()
+//         .repo_owner("santifa")
+//         .repo_name("rustea")
+//         .bin_name("github")
+//         .show_download_progress(true)
+//         .current_version(cargo_crate_version!())
+//         .build()?
+//         .update()?;
+//     Ok(status)
+// }
 
 fn main() {
     let rustea: Rustea = argh::from_env();
@@ -266,7 +272,7 @@ fn main() {
             rename.path,
             rustea.message,
         ),
-        RusteaCmd::Update(_) => todo!(),
+        RusteaCmd::Update(update) => updater::update(update.minified),
     };
 
     match res {

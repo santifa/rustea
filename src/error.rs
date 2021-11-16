@@ -14,7 +14,7 @@
 /// You should have received a copy of the GNU General Public License
 /// along with this program. If not, see <https://www.gnu.org/licenses/>.
 use core::fmt;
-use std::{fmt::Display, io};
+use std::{fmt::Display, io, num::ParseIntError};
 
 use crate::gitea::gitea_api;
 
@@ -23,8 +23,10 @@ use crate::gitea::gitea_api;
 pub enum Error {
     Api(gitea_api::ApiError),
     Io(io::Error),
+    Version(ParseIntError),
+    Update(ureq::Error),
     Configuration(ConfigError),
-    Push(String),
+    Rustea(String),
 }
 
 #[derive(Debug)]
@@ -49,8 +51,10 @@ impl std::error::Error for Error {
         match *self {
             Error::Api(ref c) => Some(c),
             Error::Io(ref c) => Some(c),
-            Error::Push(_) => None,
+            Error::Rustea(_) => None,
             Error::Configuration(_) => None,
+            Error::Version(ref c) => Some(c),
+            Error::Update(ref c) => Some(c),
         }
     }
 
@@ -58,8 +62,10 @@ impl std::error::Error for Error {
         match *self {
             Error::Api(ref c) => Some(c),
             Error::Io(ref c) => Some(c),
-            Error::Push(_) => None,
+            Error::Rustea(_) => None,
             Error::Configuration(_) => None,
+            Error::Version(ref c) => Some(c),
+            Error::Update(ref c) => Some(c),
         }
     }
 }
@@ -69,12 +75,14 @@ impl fmt::Display for Error {
         match self {
             Error::Api(e) => write!(f, "Gitea api error: {}", e),
             Error::Io(e) => write!(f, "IO Error: {}", e),
-            Error::Push(e) => write!(f, "Error pushing configuration: {}", e),
+            Error::Rustea(e) => write!(f, "Error pushing configuration: {}", e),
             Error::Configuration(e) => match e {
                 ConfigError::WriteError(_) => write!(f, "Failed to write configuration {}", e),
                 ConfigError::ReadError(_) => write!(f, "Failed to read configuration {}", e),
                 ConfigError::LocationError => write!(f, "Could not find home directory"),
             },
+            Error::Version(e) => write!(f, "Failed to parse version: {}", e),
+            Error::Update(e) => write!(f, "Update failed: {}", e),
         }
     }
 }
@@ -100,5 +108,17 @@ impl From<toml::ser::Error> for Error {
 impl From<toml::de::Error> for Error {
     fn from(err: toml::de::Error) -> Self {
         Error::Configuration(ConfigError::ReadError(err))
+    }
+}
+
+impl From<ParseIntError> for Error {
+    fn from(err: ParseIntError) -> Self {
+        Error::Version(err)
+    }
+}
+
+impl From<ureq::Error> for Error {
+    fn from(err: ureq::Error) -> Self {
+        Error::Update(err)
     }
 }

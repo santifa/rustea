@@ -23,19 +23,18 @@ use core::fmt;
 use error::Error;
 use faccess::PathExt;
 use gitea::{
-    gitea_api::{self, ContentEntry, ContentsResponse},
+    gitea_api::{ContentEntry, ContentsResponse},
     GiteaClient,
 };
 use serde_derive::{Deserialize, Serialize};
-use std::os::unix::fs::PermissionsExt;
 use std::{
     env,
     fmt::Display,
     fs::{self, File},
-    io,
     io::{Read, Write},
     path::PathBuf,
 };
+use std::{io, os::unix::fs::PermissionsExt};
 use tabwriter::TabWriter;
 
 use crate::gitea::gitea_api::ContentType;
@@ -44,18 +43,18 @@ use crate::gitea::gitea_api::ContentType;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// The version of rustea
-pub const VERSION: &str = "0.1.3";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The default configuration name used by rustea.
-pub const DEFAULT_CONF_NAME: &str = ".rustea.toml";
+const DEFAULT_CONF_NAME: &str = ".rustea.toml";
 
 /// The default path is in the users home directory.
-pub fn get_default_path() -> Result<String> {
+fn get_default_path() -> Result<String> {
     match env::var_os("HOME") {
         Some(val) => {
             let home = String::from(val.to_str().unwrap());
             Ok(home + "/" + DEFAULT_CONF_NAME)
-        }
+         }
         None => Err(Error::Configuration(error::ConfigError::LocationError)),
     }
 }
@@ -118,7 +117,7 @@ impl RusteaConfiguration {
                 repository: client.repository,
                 owner: client.owner.clone(),
                 email: String::new(),
-                author: client.owner.clone(),
+                author: client.owner,
             },
         };
 
@@ -178,7 +177,11 @@ impl Display for RemoteRepository {
 }
 
 impl RemoteRepository {
-    /// Create a new `RemoteRepository` with an api client.
+    /// Create a new `RemoteRepository` which acts as a client
+    /// to the backend remote repository.
+    /// # Error
+    ///   - `Error::Api` if the real client could not constructed
+    ///  - ``
     pub fn new(config: RusteaConfiguration) -> Result<Self> {
         let c = GiteaClient::new(
             &config.repo.url,
@@ -188,7 +191,7 @@ impl RemoteRepository {
             &config.repo.owner,
         )
         .map_err(Error::Api)?;
-
+        check_folder(&config.script_folder)?;
         Ok(RemoteRepository { config, api: c })
     }
 
@@ -301,13 +304,12 @@ impl RemoteRepository {
     /// argument. The existence of the `path` should be validated beforehand.
     fn push_files(
         &self,
-        path: &PathBuf,
-        // files: &[PathBuf],
+        path: &std::path::Path,
         feature_set: &str,
         script: bool,
         cmt_msg: Option<&str>,
     ) -> Result<()> {
-        let files = read_folder(&path)?;
+        let files = read_folder(path)?;
         for file in files {
             let remote_path = to_remote_path(&file, script)?;
             let content = read_file(&file)?;
@@ -343,7 +345,7 @@ impl RemoteRepository {
         cmt_msg: Option<String>,
     ) -> Result<String> {
         if !self.check_feature_set_exists(name)? {
-            return Err(Error::Push(format!("No features set named {}", name)));
+            return Err(Error::Rustea(format!("No features set named {}", name)));
         }
 
         if let Some(path) = path {
@@ -352,9 +354,9 @@ impl RemoteRepository {
             if path.exists() {
                 self.push_files(&path, name, script, cmt_msg.as_deref())?;
             } else {
-                return Err(Error::Push(format!(
-                    "File {} doesn't exists",
-                    path.display()
+                return Err(Error::Io(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("File {} not found.", path.display()),
                 )));
             }
         } else {
@@ -430,9 +432,8 @@ impl RemoteRepository {
         config: bool,
     ) -> Result<String> {
         if !self.check_feature_set_exists(name)? {
-            return Err(Error::Push(format!("No features set named {}", name)));
+            return Err(Error::Rustea(format!("No features set named {}", name)));
         }
-        check_folder(&self.config.script_folder)?;
         let prefix = format!("{}/scripts", name);
         let feature_set = self.api.get_folder(name)?;
 
@@ -482,7 +483,7 @@ impl RemoteRepository {
         cmt_msg: Option<String>,
     ) -> Result<String> {
         if !self.check_feature_set_exists(name)? {
-            return Err(Error::Push(format!("No features set named {}", name)));
+            return Err(Error::Rustea(format!("No features set named {}", name)));
         }
         let feature_set = self.api.get_folder(name)?;
 
@@ -507,401 +508,17 @@ impl RemoteRepository {
     }
 }
 
-// impl RepositoryConfig {
-//     /// This function constructs a new Gitea API client for requests.
-//     fn create_api_client(&self) -> Result<GiteaClient> {
-//         GiteaClient::new(
-//             &self.url,
-//             Some(&self.api_token),
-//             None,
-//             &self.repository,
-//             &self.owner,
-//         )
-//         .map_err(Error::Api)
-//     }
-
-//     /// This function queries the remote repository root and
-//     /// returns a list of `ContentEntry` with `ContentType::Dir`.
-//     /// All directories in the root are considered as feature sets.
-//     fn get_feature_sets(&self, api: &GiteaClient) -> Result<ContentsResponse> {
-//         api.get_file_or_folder("", Some(ContentType::Dir))
-//             .map_err(Error::Api)
-//     }
-
-//     /// This function returns true if a certain folder in the remote repository root is found.
-//     fn check_feature_set_exists(&self, api: &GiteaClient, name: &str) -> Result<bool> {
-//         let content = self.get_feature_sets(&api)?.content;
-//         for e in content {
-//             if e.name == name {
-//                 return Ok(true);
-//             }
-//         }
-//         Ok(false)
-//     }
-
-//     /// This function prints informations about the remote instance and the
-//     /// used repository to the command line.
-//     pub fn info(&self) -> Result<()> {
-//         let api = self.create_api_client()?;
-//         let gitea_version = api.get_gitea_version()?;
-//         let repository = api.get_repository_information()?;
-//         println!("{}", gitea_version);
-//         println!("{}", repository);
-//         Ok(())
-//     }
-
-//     /// This function prints either the feature sets contained in the remote
-//     /// repository or if `name` is provided all files found in the feature set.
-//     pub fn list(&self, feature_set: Option<&str>) -> Result<()> {
-//         let api = self.create_api_client()?;
-//         match feature_set {
-//             Some(n) => {
-//                 let feature_set = api.get_folder(n)?;
-//                 println!("Feature Set: {}\n{}", n, feature_set);
-//             }
-//             None => {
-//                 let feature_sets = self.get_feature_sets(&api)?;
-//                 println!("Feature Sets:\n{}", feature_sets);
-//             }
-//         }
-//         Ok(())
-//     }
-
-//     /// This function creates a new feature set within the remote repositories root.
-//     ///
-//     /// Since git ignores empty folders, a standard way is used. The file empty
-//     /// `<featurename>/.gitkeep` is created instead.
-//     /// If the feature already exists nothing is returned and indicates success,
-//     /// Normaly the API returns the content entry for the created file but this is
-//     /// useless in this case. We only check the HTTP return code.
-//     pub fn new_feature_set(&self, feature_set: &str, cmt_msg: Option<&str>) -> Result<()> {
-//         let api = self.create_api_client()?;
-//         if !self.check_feature_set_exists(&api, feature_set)? {
-//             api.create_or_update_file(
-//                 feature_set,
-//                 "/.gitkeep",
-//                 "".as_bytes(),
-//                 &self.author,
-//                 &self.email,
-//                 cmt_msg,
-//             )?;
-//             api.create_or_update_file(
-//                 feature_set,
-//                 "/scripts/.gitkeep",
-//                 "".as_bytes(),
-//                 &self.author,
-//                 &self.email,
-//                 cmt_msg,
-//             )?;
-//         }
-//         Ok(())
-//     }
-
-//     /// This function tries to delete files from the remote repository.
-//     ///
-//     /// It takes the `name` of the feature set and optional a `path` to some file.
-//     /// It no path if provided the whole feature set is deleted. If some path is provided
-//     /// and `script` is set to true `path` shall point to a file name in the scripts folder
-//     /// of the feature set. Otherwise the function tries to delete a configuration file
-//     /// folder denoted by path.
-//     pub fn delete(
-//         &self,
-//         name: &str,
-//         path: Option<&str>,
-//         script: bool,
-//         recursive: bool,
-//         cmt_msg: Option<&str>,
-//     ) -> Result<()> {
-//         let api = self.create_api_client()?;
-//         match path {
-//             Some(path) if script => api.delete_file_or_folder(
-//                 &format!("{}/scripts/{}", name, path),
-//                 false,
-//                 &self.author,
-//                 &self.email,
-//                 cmt_msg,
-//             ),
-//             Some(path) => api.delete_file_or_folder(
-//                 &format!("{}/{}", name, path),
-//                 recursive,
-//                 &self.author,
-//                 &self.email,
-//                 cmt_msg,
-//             ),
-//             None => api.delete_file_or_folder(name, true, &self.author, &self.email, cmt_msg),
-//         }
-//         .map_err(Error::Api)
-//     }
-
-//     /// This function pushes files located in a `path` to the feature set in the remote repository.
-//     ///
-//     /// It distinguishes between script files and configuration files through the `script`
-//     /// argument. The existence of the `path` should be validated beforehand.
-//     fn push_files(
-//         &self,
-//         api: &GiteaClient,
-//         path: &PathBuf,
-//         // files: &[PathBuf],
-//         feature_set: &str,
-//         script: bool,
-//         cmt_msg: Option<&str>,
-//     ) -> Result<()> {
-//         let files = read_folder(&path)?;
-//         for file in files {
-//             let remote_path = to_remote_path(&file, script)?;
-//             let content = read_file(&file)?;
-//             api.create_or_update_file(
-//                 feature_set,
-//                 &remote_path,
-//                 &content,
-//                 &self.author,
-//                 &self.email,
-//                 cmt_msg,
-//             )?;
-//             println!(
-//                 "Pushed file {} into feature set {}",
-//                 remote_path, feature_set
-//             );
-//         }
-//         Ok(())
-//     }
-
-//     /// This function pushes files a feature set in the remote repository.
-//     ///
-//     /// If no path is provided this function fetches all files stored
-//     /// in the remote repository and tries to push a local version if found.
-//     /// Script files are searched in the provided `script_dir`.
-//     ///
-//     /// If some path is provided this function push the local file or folder.
-//     /// Folders are pushed recursively.
-//     pub fn push(
-//         &self,
-//         name: &str,
-//         script_dir: &PathBuf,
-//         path: Option<&str>,
-//         script: bool,
-//         cmt_msg: Option<&str>,
-//     ) -> Result<()> {
-//         let api = self.create_api_client()?;
-//         if !self.check_feature_set_exists(&api, name)? {
-//             return Err(Error::Push(format!("No features set named {}", name)));
-//         }
-
-//         if let Some(path) = path {
-//             // Push a config or script file or folder
-//             let path = PathBuf::from(path).canonicalize()?;
-//             if path.exists() {
-//                 self.push_files(&api, &path, name, script, cmt_msg)?;
-//             } else {
-//                 return Err(Error::Push(format!(
-//                     "File {} doesn't exists",
-//                     path.display()
-//                 )));
-//             }
-//         } else {
-//             // Push everything found in the feature set
-//             let feature_set = api.get_folder(name)?;
-//             let script_remote = format!("{}/scripts/", name);
-
-//             for entry in feature_set.content {
-//                 let script = entry.path.starts_with(&script_remote);
-//                 let file_path = to_local_path(&entry.path, script, &script_dir.to_string_lossy())?;
-//                 if file_path.exists() {
-//                     self.push_files(&api, &file_path, name, script, cmt_msg)?;
-//                 }
-//             }
-//         }
-//         Ok(())
-//     }
-
-//     /// This function pulls files from the remote repository.
-//     ///
-//     /// It takes a vector of `ContentEntry` converts the path to a local one
-//     /// depending on the `script` argument. Afterwards, if the path is writable
-//     /// the files are pulled from the remote repository and gets written to the
-//     /// local destination. It returns an error if some IO failure happens or
-//     /// the destination is not writable for the current user.
-//     fn pull_files(
-//         &self,
-//         api: &GiteaClient,
-//         files: &[ContentEntry],
-//         script: bool,
-//         script_dir: &PathBuf,
-//     ) -> Result<()> {
-//         for file in files {
-//             let content = api.download_file(&file.path)?;
-//             let path = to_local_path(&file.path, script, &script_dir.to_string_lossy())?;
-//             // If we have a regular config file, check if the parent folder exists and is writable
-//             if !script {
-//                 check_folder(&path)?;
-//             }
-
-//             let mut f = File::create(&path)?;
-//             f.write_all(content.as_bytes()).map_err(Error::Io)?;
-//             if script {
-//                 let mut perms = f.metadata()?.permissions();
-//                 perms.set_mode(0o751);
-//                 f.set_permissions(perms)?;
-//             }
-//             println!("Pulled file {}", path.display());
-//         }
-//         Ok(())
-//     }
-
-//     /// This function pulls files from the remote repository and stores them
-//     /// on the local machine depending on the remote path.
-//     ///
-//     /// For the provided feature set either the script files or configuration files
-//     /// are pulled depending on the `script` and `config` argument. If both are set
-//     /// to true only script files are pulled to the local machine.
-//     /// If both arguments are set to false everything if pulled from the feature set.
-//     ///
-//     /// ## Attention
-//     ///
-//     /// If `path` is provided `script` or `config` flag is set only files matching
-//     /// the path are pulled. This doesn't distinguishes between remote pathes with the same suffix.
-//     /// Meaning `/test` and `/example/test` are the same if only `test` is given as path.
-//     pub fn pull(
-//         &self,
-//         name: &str,
-//         path: Option<&str>,
-//         script_dir: &PathBuf,
-//         script: bool,
-//         config: bool,
-//     ) -> Result<()> {
-//         let api = self.create_api_client()?;
-//         if !self.check_feature_set_exists(&api, name)? {
-//             return Err(Error::Push(format!("No features set named {}", name)));
-//         }
-//         check_folder(script_dir)?;
-//         let prefix = format!("{}/scripts", name);
-//         let feature_set = api.get_folder(name)?;
-
-//         if script || config {
-//             let files = feature_set
-//                 .content
-//                 .into_iter()
-//                 .filter(|e| {
-//                     if script {
-//                         e.path.starts_with(&prefix)
-//                     } else {
-//                         // We do not distinguish further between the cases
-//                         !e.path.starts_with(&prefix)
-//                     }
-//                 })
-//                 .filter(|e| match path {
-//                     Some(p) => e.path.ends_with(&p),
-//                     None => true,
-//                 })
-//                 .collect::<Vec<ContentEntry>>();
-//             self.pull_files(&api, &files, script, script_dir)?;
-//         } else {
-//             // Pull everything found in the feature set
-//             for file in feature_set.content {
-//                 let script = file.path.starts_with(&prefix);
-//                 self.pull_files(&api, &[file], script, script_dir)?;
-//             }
-//         }
-//         Ok(())
-//     }
-
-//     /// This function renames either feature sets or folder and files within the remote repository.
-//     ///
-//     /// Provide the feature set `name` in which the files should be moved. If the `path` is
-//     /// empty the whole feature set is renamed. Otherwise, the `path` is resolved and the
-//     /// last part of the path (after `/`) is replaced with `new_name`.
-//     ///
-//     /// Script files can not be renamed.
-//     pub fn rename(
-//         &self,
-//         name: &str,
-//         new_name: &str,
-//         _path: Option<&str>,
-//         cmt_msg: Option<&str>,
-//     ) -> Result<()> {
-//         let api = self.create_api_client()?;
-//         if !self.check_feature_set_exists(&api, name)? {
-//             return Err(Error::Push(format!("No features set named {}", name)));
-//         }
-//         let feature_set = api.get_folder(name)?;
-
-//         self.new_feature_set(new_name, None)?;
-//         for file in feature_set.content {
-//             let content = api.download_file(&file.path)?;
-//             let base_path = file.path.strip_prefix(name).unwrap();
-//             api.create_or_update_file(
-//                 new_name,
-//                 &base_path,
-//                 content.as_bytes(),
-//                 &self.author,
-//                 &self.email,
-//                 cmt_msg,
-//             )?;
-//         }
-//         self.delete(name, None, false, true, cmt_msg)?;
-
-//         // match path {
-//         //     Some(p) => {
-//         //         // Distinguish between script files and normal files by existence
-//         //         let files = feature_set.content.into_iter().find(|e| e.path.ends_with(p));
-
-//         //         // Fetch the folder or file
-//         //         let files = api.get_folder(pbuf?.to_str().unwrap())?;
-//         //         // Convert old path to new one
-//         //         let new_path = match p.split_once("/") {
-//         //             Some((_, path)) => format!("{}/{}", path, new_name),
-//         //             None => new_name.into(),
-//         //         };
-
-//         //         for file in files.content {
-//         //             let content = api.download_file(&file.path)?;
-
-//         //             //let base_path = file.path;
-
-//         //             api.create_or_update_file(
-//         //                 name,
-//         //                 &new_path,
-//         //                 content.as_bytes(),
-//         //                 &self.author,
-//         //                 &self.email,
-//         //                 cmt_msg,
-//         //             )?;
-//         //         }
-//         //         self.delete(name, path, false, true, cmt_msg)?;
-//         //     }
-//         //     None => {
-//         //         // Rename the feature set
-//         //         self.new_feature_set(new_name, None)?;
-//         //         for file in feature_set.content {
-//         //             let content = api.download_file(&file.path)?;
-//         //             let base_path = file.path.strip_prefix(name).unwrap();
-//         //             api.create_or_update_file(
-//         //                 new_name,
-//         //                 &base_path,
-//         //                 content.as_bytes(),
-//         //                 &self.author,
-//         //                 &self.email,
-//         //                 cmt_msg,
-//         //             )?;
-//         //         }
-//         //         self.delete(name, None, false, true, cmt_msg)?;
-//         //     }
-//         // }
-//         Ok(())
-//     }
-// }
-
 /// Read a file denoted by a `PathBuf` into a `Vec<u8>` or return the io Error.
-fn read_file(path: &PathBuf) -> Result<Vec<u8>> {
+fn read_file(path: &std::path::Path) -> Result<Vec<u8>> {
     let mut b: Vec<u8> = Vec::with_capacity(path.metadata()?.len() as usize);
-    File::open(path.as_path()).and_then(|mut f| f.read_to_end(&mut b))?;
+    File::open(path).and_then(|mut f| f.read_to_end(&mut b))?;
     Ok(b)
 }
 
 /// This function takes a path and either returns it directly as vector if
 /// the path denotes a singles file. Otherwise, the directory is crawled
 /// recursively and a vector of all known files below `Path` is returned.
-fn read_folder(path: &PathBuf) -> Result<Vec<PathBuf>> {
+fn read_folder(path: &std::path::Path) -> Result<Vec<PathBuf>> {
     let mut v: Vec<PathBuf> = vec![];
     let path = path.canonicalize()?;
     if path.is_dir() {
@@ -929,15 +546,15 @@ fn read_folder(path: &PathBuf) -> Result<Vec<PathBuf>> {
 /// This function converts a `PathBuf` into a remote path.
 /// The `path` either corresponds to a script path for a feature set or
 /// the path of a configuration file.
-fn to_remote_path(path: &PathBuf, script: bool) -> Result<String> {
+fn to_remote_path(path: &std::path::Path, script: bool) -> Result<String> {
     match script {
-        true => {
-            let name = path.file_name().ok_or(Error::Push(format!(
-                "{} is not a valid path to a file.",
-                path.display()
-            )))?;
-            Ok(format!("/scripts/{}", name.to_string_lossy()))
-        }
+        true => match path.file_name() {
+            Some(name) => Ok(format!("/scripts/{}", name.to_string_lossy())),
+            None => Err(Error::Io(io::Error::new(
+                io::ErrorKind::Other,
+                format!("{} not a valid file path", path.display()),
+            ))),
+        },
         false => Ok(path.to_string_lossy().into_owned()),
     }
 }
@@ -953,24 +570,26 @@ fn to_local_path(remote_path: &str, script: bool, script_dir: &str) -> Result<Pa
     match split {
         Some((_, name)) if script => Ok(PathBuf::from(format!("{}/{}", script_dir, name))),
         Some((_, path)) if !script => Ok(PathBuf::from(format!("/{}", path))),
-        None | Some(_) => Err(Error::Push(format!(
-            "Remote path {} can not be converted to a local one.",
-            remote_path
+        None | Some(_) => Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "Remote path {} can not converted to local one.",
+                remote_path
+            ),
         ))),
     }
 }
 
-/// This function takes a folder path and creates the path if it
+/// This function takes a folder path and creates that path if it
 /// not exists and checks if the path is writable afterwards.
-fn check_folder(path: &PathBuf) -> Result<()> {
-    // let path = PathBuf::from(dir);
+fn check_folder(path: &std::path::Path) -> Result<()> {
     if !path.exists() {
         fs::DirBuilder::new().recursive(true).create(&path)?;
     }
     if !path.writable() {
-        return Err(Error::Push(format!(
-            "Path {} not writable. Do you need to be root?",
-            path.display()
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("Path {} not writable.", path.display()),
         )));
     }
     Ok(())
