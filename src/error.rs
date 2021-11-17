@@ -18,6 +18,9 @@ use std::{fmt::Display, io, num::ParseIntError};
 
 use crate::gitea::gitea_api;
 
+/// A `Result` alias where the `Err` case is `rustea::Error`.
+pub type Result<T> = std::result::Result<T, Error>;
+
 /// This is the main error type for rustea it encapsulates all the other types or errors.
 #[derive(Debug)]
 pub enum Error {

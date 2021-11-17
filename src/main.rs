@@ -15,8 +15,6 @@ extern crate argh;
 /// You should have received a copy of the GNU General Public License
 /// along with this program. If not, see <https://www.gnu.org/licenses/>.
 extern crate base64;
-extern crate faccess;
-extern crate self_update;
 extern crate serde;
 extern crate serde_json;
 extern crate tabwriter;
@@ -24,23 +22,21 @@ extern crate toml;
 extern crate ureq;
 
 use argh::FromArgs;
-use rustea::{RemoteRepository, RusteaConfiguration};
-// use self_update::cargo_crate_version;
+use rustea::{updater::Updater, RemoteRepository, RusteaConfiguration};
 use std::process::exit;
 
-mod updater;
-
 #[derive(FromArgs, PartialEq, Debug)]
-/// A simple gitea based configuration management.
+/// A simple cli configuration management which uses gitea as backend.
 struct Rustea {
     /// provide a custom configuration file
     #[argh(option, short = 'c')]
     config: Option<String>,
 
-    /// a commit message used for changing the remote repository
+    /// a commit message used for changes in he remote repository
     #[argh(option, short = 'm')]
     message: Option<String>,
 
+    /// the action which rustea executes
     #[argh(subcommand)]
     cmd: RusteaCmd,
 }
@@ -95,22 +91,21 @@ struct RusteaInit {
 
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "info")]
-/// Show informations about the remote repository or configuration.
+/// Show informations about rustea and the remote repository.
 struct RusteaInfo {}
 
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "list")]
-/// Show feature sets stores in the remote repository
-/// or files stored in a feature set.
+/// Show feature sets stores in the remote repository.
 struct RusteaList {
-    /// optional feature set name for content listing
+    /// provide a feature set name for listing its content
     #[argh(positional)]
     feature_set: Option<String>,
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "new")]
-/// Create a new feature set in the remote repository
+/// Create a new feature set in the remote repository.
 struct RusteaNew {
     /// the name of the feature set
     #[argh(positional)]
@@ -119,13 +114,13 @@ struct RusteaNew {
 
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "delete")]
-/// Delete a feature set or folders or files within the feature set
+/// Delete a feature set, files or folders from the remote repository.
 struct RusteaDelete {
     /// delete from path recursively
     #[argh(switch, short = 'r')]
     recursive: bool,
 
-    /// delete a script file
+    /// delete a script file within a feature set
     #[argh(switch, short = 's')]
     script: bool,
 
@@ -133,20 +128,20 @@ struct RusteaDelete {
     #[argh(positional)]
     feature_set: String,
 
-    /// the path to a subfolder or file of the feature set
+    /// an optional path within a feature set which should be deleted
     #[argh(positional)]
     sub_path: Option<String>,
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "pull")]
-/// Pull a feature set or only the configuration/script files on the local machine.
+/// Pull a feature set or parts of it to the local machine.
 struct RusteaPull {
-    /// deploy only script files
+    /// pull only script files
     #[argh(switch, short = 's')]
     script: bool,
 
-    /// deploy only configuration files
+    /// pull only configuration files
     #[argh(switch, short = 'c')]
     config: bool,
 
@@ -163,7 +158,7 @@ struct RusteaPull {
 #[argh(subcommand, name = "push")]
 /// Push configuration files or script files to a feature set.
 struct RusteaPush {
-    /// push a local file to the feature set script folder
+    /// push a local file to the script folder of a feature set
     #[argh(switch, short = 's')]
     script: bool,
 
@@ -171,16 +166,16 @@ struct RusteaPush {
     #[argh(positional)]
     feature_set: String,
 
-    /// the path to a subfolder or file of the feature set
+    /// push a path to the feature set
     #[argh(positional)]
     sub_path: Option<String>,
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "rename")]
-/// Rename in the remote repository a feature set or folders and files in a feature set.
+/// Rename a feature set, file or folder in the remote repository.
 struct RusteaRename {
-    /// the path to a subfolder or file of the feature set
+    /// an optional path to a file or folder which should be renamed
     #[argh(option, short = 'p')]
     path: Option<String>,
 
@@ -188,23 +183,10 @@ struct RusteaRename {
     #[argh(positional)]
     feature_set: String,
 
-    /// the new name of the feature set or folder or file
+    /// the new name for the feature set or path
     #[argh(positional)]
     new_name: String,
 }
-
-/// Run the rustea self-updater
-// fn update() -> Result<self_update::Status, Box<dyn::std::error::Error>> {
-//     let status = self_update::backends::github::Update::configure()
-//         .repo_owner("santifa")
-//         .repo_name("rustea")
-//         .bin_name("github")
-//         .show_download_progress(true)
-//         .current_version(cargo_crate_version!())
-//         .build()?
-//         .update()?;
-//     Ok(status)
-// }
 
 fn main() {
     let rustea: Rustea = argh::from_env();
@@ -272,7 +254,7 @@ fn main() {
             rename.path,
             rustea.message,
         ),
-        RusteaCmd::Update(update) => updater::update(update.minified),
+        RusteaCmd::Update(update) => Updater::new().and_then(|u| u.update(update.minified)),
     };
 
     match res {

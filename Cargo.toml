@@ -23,12 +23,7 @@ toml = "0.5"
 # Content encoding
 base64 = "0.13.0"
 # Reqwest alternative for the Gitea API
-ureq = { version = "2.1.1", features = ["json"] }
-# tokio = { version = "1", features = ["full"] }
-# Handle directory access
-faccess = "0.2.3"
-# Easy self-updater
-self_update = "0.27.0"
+ureq = { version = "2.1.1", default_features = false, features = ["json", "tls"] }
 # Nice table layout
 tabwriter = "1.2.1"
 # Argument parsing

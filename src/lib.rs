@@ -4,6 +4,7 @@
 
 pub mod error;
 pub mod gitea;
+pub mod updater;
 /// rustea is a small cli tool to interact with git repositories hosted
 /// by Gitea Instances. Copyright (C) 2021  Henrik Jürges (juerges.henrik@gmail.com)
 ///
@@ -20,10 +21,9 @@ pub mod gitea;
 /// You should have received a copy of the GNU General Public License
 /// along with this program. If not, see <https://www.gnu.org/licenses/>.
 use core::fmt;
-use error::Error;
-use faccess::PathExt;
+use error::{Error, Result};
 use gitea::{
-    gitea_api::{ContentEntry, ContentsResponse},
+    gitea_api::{ContentEntry, ContentType, ContentsResponse},
     GiteaClient,
 };
 use serde_derive::{Deserialize, Serialize};
@@ -31,16 +31,11 @@ use std::{
     env,
     fmt::Display,
     fs::{self, File},
-    io::{Read, Write},
-    path::PathBuf,
+    io::{self, Read, Write},
+    os::unix::prelude::PermissionsExt,
+    path::{Path, PathBuf},
 };
-use std::{io, os::unix::fs::PermissionsExt};
 use tabwriter::TabWriter;
-
-use crate::gitea::gitea_api::ContentType;
-
-/// A `Result` alias where the `Err` case is `rustea::Error`.
-pub type Result<T> = std::result::Result<T, Error>;
 
 /// The version of rustea
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -54,7 +49,7 @@ fn get_default_path() -> Result<String> {
         Some(val) => {
             let home = String::from(val.to_str().unwrap());
             Ok(home + "/" + DEFAULT_CONF_NAME)
-         }
+        }
         None => Err(Error::Configuration(error::ConfigError::LocationError)),
     }
 }
@@ -71,7 +66,7 @@ impl Display for RusteaConfiguration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Using rustea version {}\nscript_folder = {}\nexclude= {}\nrepo = {{\n{}\n}}",
+            "rustea version {}\nscript_folder = {}\nexclude= {}\nrepo = {{\n{}\n}}",
             VERSION,
             self.script_folder.canonicalize().unwrap().display(),
             self.exclude,
@@ -90,7 +85,7 @@ impl RusteaConfiguration {
     }
 
     /// This function writes the `Configuration` to the provided `PathBuf`.
-    pub fn write_config_file(&self, file_path: &PathBuf) -> Result<()> {
+    pub fn write_config_file(&self, file_path: &Path) -> Result<()> {
         // toml::to_string_pretty(self).and_then(|c| write_file(&c, file_path))
         let conf_string = toml::to_string_pretty(self)?;
         let mut file = File::create(file_path)?;
@@ -153,9 +148,11 @@ impl Display for RepositoryConfig {
             self.url, self.api_token, self.repository, self.owner, self.email, self.author
         )
         .unwrap();
-        tw.flush().unwrap();
-        let written = String::from_utf8(tw.into_inner().unwrap()).unwrap();
-        write!(f, "{}", written)
+
+        match tw.into_inner() {
+            Ok(w) => write!(f, "{}", String::from_utf8_lossy(&w)),
+            Err(e) => write!(f, "Failed to align config: {}", e),
+        }
     }
 }
 
@@ -206,21 +203,18 @@ impl RemoteRepository {
 
     /// This function returns true if a certain folder in the remote repository root is found.
     fn check_feature_set_exists(&self, name: &str) -> Result<bool> {
-        let content = self.get_feature_sets()?.content;
-        for e in content {
-            if e.name == name {
-                return Ok(true);
-            }
-        }
-        Ok(false)
+        self.get_feature_sets()
+            .map(|c| c.content.into_iter().any(|e| e.name == name))
     }
 
     /// This function prints informations about the remote instance and the
     /// used repository to the command line.
     pub fn info(&self) -> Result<String> {
-        let gitea_version = self.api.get_gitea_version()?;
-        let repository = self.api.get_repository_information()?;
-        Ok(format!("{}\n{}", gitea_version, repository))
+        Ok(format!(
+            "{}\n{}",
+            self.api.get_gitea_version()?,
+            self.api.get_repository_information()?
+        ))
     }
 
     /// This function prints either the feature sets contained in the remote
@@ -329,7 +323,7 @@ impl RemoteRepository {
         Ok(())
     }
 
-    /// This function pushes files a feature set in the remote repository.
+    /// This function pushes files into a feature set in the remote repository.
     ///
     /// If no path is provided this function fetches all files stored
     /// in the remote repository and tries to push a local version if found.
@@ -404,7 +398,7 @@ impl RemoteRepository {
             if script {
                 let mut perms = f.metadata()?.permissions();
                 perms.set_mode(0o751);
-                f.set_permissions(perms)?;
+                std::fs::set_permissions(&path, perms)?;
             }
             println!("Pulled file {}", path.display());
         }
@@ -493,7 +487,7 @@ impl RemoteRepository {
             let base_path = file.path.strip_prefix(name).unwrap();
             self.api.create_or_update_file(
                 new_name,
-                &base_path,
+                base_path,
                 content.as_bytes(),
                 &self.config.repo.author,
                 &self.config.repo.email,
@@ -586,7 +580,7 @@ fn check_folder(path: &std::path::Path) -> Result<()> {
     if !path.exists() {
         fs::DirBuilder::new().recursive(true).create(&path)?;
     }
-    if !path.writable() {
+    if path.metadata()?.permissions().readonly() {
         return Err(Error::Io(io::Error::new(
             io::ErrorKind::PermissionDenied,
             format!("Path {} not writable.", path.display()),
