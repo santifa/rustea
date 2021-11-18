@@ -60,7 +60,7 @@ impl GiteaClient {
     fn create_new_api_token(url: &str, token_name: Option<&str>) -> ApiResult<ApiToken> {
         println!("Requesting a new api token.");
         let username = read_from_cli("Username");
-        let password = read_from_cli("Password");
+        let password = rpassword::read_password_from_tty(Some("Password: ")).unwrap();
         let auth = base64::encode(format!("{}:{}", username, password).as_bytes());
 
         let agent = AgentBuilder::new().user_agent("rustea").build();
@@ -99,7 +99,7 @@ impl GiteaClient {
                     "Requesting new topen with name {}",
                     token_name.unwrap_or("rustea-devops")
                 );
-                let token = GiteaClient::create_new_api_token(&url, token_name)?;
+                let token = GiteaClient::create_new_api_token(url, token_name)?;
                 println!("{}", token);
 
                 let client = GiteaClient {
@@ -158,7 +158,7 @@ impl GiteaClient {
             .call()?
             .into_json()
             .map_err(ApiError::Io)?;
-        Ok(ContentsResponse::new(res, filter_type)?)
+        ContentsResponse::new(res, filter_type)
     }
 
     /// Utilizes the `get_file_or_folder` function and returns the first found file
@@ -167,12 +167,12 @@ impl GiteaClient {
     /// Don't use this for folders.
     pub fn get_file(&self, name: &str) -> ApiResult<ContentEntry> {
         let mut res = self.get_file_or_folder(name, Some(ContentType::File))?;
-        res.content
-            .pop()
-            .ok_or(ApiError::InvalidContentResponse(format!(
+        res.content.pop().ok_or_else(|| {
+            ApiError::InvalidContentResponse(format!(
                 "No valid response for the request of file {}",
                 name
-            )))
+            ))
+        })
     }
 
     pub fn get_folder(&self, name: &str) -> ApiResult<ContentsResponse> {

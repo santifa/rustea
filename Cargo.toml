@@ -26,5 +26,7 @@ base64 = "0.13.0"
 ureq = { version = "2.1.1", default_features = false, features = ["json", "tls"] }
 # Nice table layout
 tabwriter = "1.2.1"
+# Password handling
+rpassword = "5.0.1"
 # Argument parsing
 argh = "0.1.6"

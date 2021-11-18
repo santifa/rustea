@@ -2,6 +2,7 @@
 //!
 //! It implements the heavy lifting for the main binary.
 
+pub mod client;
 pub mod error;
 pub mod gitea;
 pub mod updater;
@@ -304,6 +305,7 @@ impl RemoteRepository {
         cmt_msg: Option<&str>,
     ) -> Result<()> {
         let files = read_folder(path)?;
+        let regex = self.config.exclude;
         for file in files {
             let remote_path = to_remote_path(&file, script)?;
             let content = read_file(&file)?;

@@ -15,6 +15,7 @@ extern crate argh;
 /// You should have received a copy of the GNU General Public License
 /// along with this program. If not, see <https://www.gnu.org/licenses/>.
 extern crate base64;
+extern crate rpassword;
 extern crate serde;
 extern crate serde_json;
 extern crate tabwriter;
