@@ -2,7 +2,6 @@
 //!
 //! It implements the heavy lifting for the main binary.
 
-pub mod client;
 pub mod error;
 pub mod gitea;
 pub mod updater;
