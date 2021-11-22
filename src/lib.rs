@@ -106,7 +106,7 @@ impl RusteaConfiguration {
         let client = GiteaClient::new(url, api_token, token_name, repository, owner)?;
         let conf = RusteaConfiguration {
             script_folder: PathBuf::from("/usr/local/bin"),
-            exclude: ".git".to_owned(),
+            exclude: r"\.git$".to_owned(),
             repo: RepositoryConfig {
                 url: client.url,
                 api_token: client.api_token,
@@ -355,7 +355,10 @@ impl RemoteRepository {
             if path.exists() {
                 self.push_files(&path, name, script, cmt_msg.as_deref())?;
             } else {
-                return Err(Error::io(io::ErrorKind::NotFound, format!("File {} not found.", path.display())));
+                return Err(Error::io(
+                    io::ErrorKind::NotFound,
+                    format!("File {} not found.", path.display()),
+                ));
             }
         } else {
             // Push everything found in the feature set
@@ -433,11 +436,9 @@ impl RemoteRepository {
             let files = feature_set
                 .content
                 .into_iter()
-                .filter(|e| {
-                    match script {
-                        true => self.local_repo.check_script(&e.path, name),
-                        false => !self.local_repo.check_script(&e.path, name),
-                    }
+                .filter(|e| match script {
+                    true => self.local_repo.check_script(&e.path, name),
+                    false => !self.local_repo.check_script(&e.path, name),
                 })
                 .filter(|e| match &path {
                     Some(p) => e.path.ends_with(p.as_str()),
@@ -538,7 +539,10 @@ impl LocalRepository {
     /// Check if a path is writable and throw an error if not.
     fn writable_path(path: &Path) -> Result<()> {
         match path.metadata()?.permissions().readonly() {
-            true => Err(Error::io(io::ErrorKind::PermissionDenied, format!("{} is readonly", path.display()))),
+            true => Err(Error::io(
+                io::ErrorKind::PermissionDenied,
+                format!("{} is readonly", path.display()),
+            )),
             false => Ok(()),
         }
     }
@@ -567,7 +571,10 @@ impl LocalRepository {
         match script {
             true => match path.file_name() {
                 Some(name) => Ok(format!("{}{}", self.script_prefix, name.to_string_lossy())),
-                None => Err(Error::io(io::ErrorKind::Other, format!("{} not a valid file path", path.display())))
+                None => Err(Error::io(
+                    io::ErrorKind::Other,
+                    format!("{} not a valid file path", path.display()),
+                )),
             },
             false => Ok(path.display().to_string()),
         }
@@ -585,7 +592,10 @@ impl LocalRepository {
                 Ok([&self.script_dir, &PathBuf::from(name)].iter().collect())
             }
             Some((_, path)) if !script => Ok(["/", path].iter().collect()),
-            None | Some(_) => Err(Error::io(io::ErrorKind::InvalidInput, format!("Remote path {} can not converted to local one.", path)))
+            None | Some(_) => Err(Error::io(
+                io::ErrorKind::InvalidInput,
+                format!("Remote path {} can not converted to local one.", path),
+            )),
         }
     }
 
