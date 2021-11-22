@@ -35,7 +35,7 @@ As a remote store for the files a Gitea server with an enabled API is used.
 The main idea behind `rustea` is to have a single static binary for configuration or feature management
 of *nix machines. It shall allow version control but without the need of having a local `git` installation
 which is quite large. Most configuration systems depend on open ports or `ssh` installed and configured on
-the target machine. 
+the target machine.
 
 Gitea is a lightwight and fast Github and Gitlab alternative written as a single go binary. It has an extensive
 API with a good __swagger__ documentation. Alternative backends such as Github are also possible (maybe on request).
@@ -53,7 +53,7 @@ The following is an example repository:
     Devops Repository:
     |- File_1 <-- ignored
     |- File_2 <-- ignored
-    +- feature_set_1/
+    +- feature_set_1/ <- First recognized folder/file
        +- scripts/ <-- folder containing script files
           |- script_1
           |- script_2
@@ -62,6 +62,9 @@ The following is an example repository:
     +- feature_set_2/
        |- feature_1/ <-- For example, /etc/postfix/ is stored remotely under mail/etc/postfix/
        |- File_1 <-- Is deployed under /
+       +- home/
+          +- user/
+             +- .zshrc <-- Is deployed under /home/user/.zshrc
 
 As one can see, files in the root directory are ignored. A feature set lives within a folder denoted by
 the name of the feature set. Within a feature set __script files__ are placed directly in the folder `scripts`.
@@ -73,8 +76,8 @@ are placed under `/`.
 The following list gives some assumptions while developing `rustea`:
   * `rustea` uses a single repository
   * feature sets are stored in a folder by their name
-  * __script files__ are stored in `feature_set/scripts/`
-  * configuration files are canonicolized and stored in `feature_set/full/path/to/config/file`
+  * __script files__ are stored in `<feature_set_name>/scripts/`
+  * configuration files are canonicolized and stored in `<feature_set_name>/full/path/to/config/file`
   * The destination of __script files__ is configurable
   * Token authentication is used for every request
   * Pull operations are collective operations for all __script files__ and/or configuration files
@@ -84,7 +87,7 @@ The following list gives some assumptions while developing `rustea`:
 An example for the main configuration which is stored under `~/.rustea.toml`:
 
     script_folder = '/etc/local/bin' <-- Local folder for script files
-    exclude = '.git' <-- Files an folders excluded
+    exclude = '\.git$' <-- Files an folders excluded
 
     [repo]
     url = 'https://git.rtzptz.xyz' <-- Base url to the gitea instance without trailing /
@@ -101,7 +104,7 @@ The name and email address are used for commiting.
 
 Either grab a pre-build copy:
 
-    curl -L https://github.com/santifa/rustea/releases/download/v0.1.1/rustea-min > /usr/local/bin/rustea
+    curl -L https://github.com/santifa/rustea/releases/download/v0.1.4/rustea-min > /usr/local/bin/rustea
 
 or build `rustea` on your own:
 
@@ -113,12 +116,11 @@ Now you can create a new repository within in your Gitea Instance.
 __!!! Be aware that you must initialize your repository with some README.md or something else.
 An empty repository refuses to add new files via API !!!__
 
-Afterwards, you can either create the `~/.rustea.toml` by yourself or run `rustea init --name <TOKEN-NAME> <URL> <REPO> <OWNER>`.
+Afterwards, you can either create the `~/.rustea.toml` by yourself or run `rustea init -n <TOKEN-NAME> <URL> <REPO> <OWNER>`.
 
 `rustea` uses some optimization for the binary size: [[Ref]](https://arusahni.net/blog/2020/03/optimizing-rust-binary-size.html), [[Ref]](https://github.com/johnthagen/min-sized-rust)
 
   * [x] build in release mode
-  + [x] Strip symbols from binary (`cargo install --force cargo-strip && cargo strip`)
   * [x] Optimization for size with  `opt-level = "s"`
   * [x] Link-time Optimization with `lto = true`
   * [x] Reduce parallel code building with `codegen-units = 1`
@@ -131,9 +133,11 @@ Afterwards, you can either create the `~/.rustea.toml` by yourself or run `ruste
 The last two options can lead to insufficient error messsages and virus scanner alert. 
 Thus, two version are provided with and without striped symbols and compression.
 
-## Development
+## Development and Contribution
 
-This crate is still young and under active usage and development.
+This crate and tool is still young so feature requests and issues are welcome.
+Feel free to open a pull requests if you implemented a new feature or closed something from the
+todo list. Open a new issues if you found bugs or want to provide notes on the code.
 
 ### Tests
 
@@ -153,7 +157,7 @@ A small list of features that came in my mind:
   * [ ] set symlink files (e.g. for cron-jobs)
   * [x] better terminal support (better display of tables)
   * [ ] installing packages, distribution agnostic?
-  * [+] Ignore specific files like `.git` (only git files hardcoded)
+  * [x] Ignore specific files like `.git` (Follows the [Rust regex syntax](https://docs.rs/regex/1.5.4/regex/#syntax))
   * [x] Pull single configuration or script files from a feature set
         (Doesn't distinguishes between similar named pathes like `/test` and `/testtest` when only `test` is given)
   * [ ] Provide other backends like Gitlab or Github
@@ -162,73 +166,6 @@ A small list of features that came in my mind:
   * [ ] feature set and local folder diff
   * [x] Scripts should be executable (this is set explicit to 751)
   * [x] Replace (https://docs.rs/reqwest/0.11.4/reqwest/index.html)[`reqwest`] with something smaller; (https://docs.rs/curl/0.4.38/curl/index.html)[curl-bindings], (https://github.com/algesten/ureq)[ureq]
-
-### Workflows
-
-These are the main workflows which I used to describe the usage 
-of `rustea` from a user perspective.
-
-*Prepare rustea*
-  * Fetch the binary from somewhere
-  * Create an inital configuration in `~/.rustea.toml` with `rustea`:
-      * The user has an api token for gitea `rustea init --token <key> <url> <repository> <owner>`
-      * The user request a new API key with `rustea init --name <token_name> <url> <repository> <owner>`
-          * The user enters username and password when asked and the token is requested 
-  * The configuration file is stored under `~/.rustea.toml` by default
-      
-*Show informations*
-  * The user can show informations about the gitea instance and the repository with `rustea info`
-  * The user can list all feature-sets in the repository with `rustea list`
-  * The user can list all script and config files of a feature set with `rustea list <name>`
-
-*Add a new feature set*
-  * The user creates a new feature set with `rustea new <feature set name>`
-  * This creates a new folder in the devops repository with `<name>/.gitkeep`
-  
-*Delete a feature set*
-  * The user can delete a feature set with `rustea delete <feature set name>`
-  * This deletes the folder `<name>/` and everything below, be carefull.
-
-*Delete a config file from a feature set*
-  * The user can delete files or folders from a feature set with `rustea delete <fs-name> <path>`
-  * Use `-r` for recursive deletes
-  * The files or folders are only deleted within the remote repository
-
-*Delete a script file from a feature set*
-  * The user can delete a script file from a feature set with `rustea delete --script <fs-name> <script-name>`
-
-*Add scripts to a feature set*
-  * The user adds script files to a feature set with `rustea push --script <fs-name> <path to file or folder>`
-  * `rustea` either takes the file and uploads it to `<fs-name>/scripts/<filename>` or if given a folder `rustea` uploads all files inside to `<fs-name>/scripts/`
-
-*Add config files to a feature set*
-  * The user adds configuration files to a feature set with `rustea push <fs-name> <path to file or folder>`
-  * A config file is stored under `<fs-name>/path/to/config-file`
-  * All files in a config folder are stored under `<fs-name>/path/to/folder/`
-  * The absolute path of a file is determined
-
-*Update the configuration files*
-  * The user may change local configuration files and want to upload the changes
-  * The user pushes all configuration files with `rustea push <fs-name>`
-  * The needed configuration files are determined from the remote repository path 
-  * Script files are searched in `/usr/local/bin/`, if the file is located somewhere else use `rustea push --script ...`
-
-*Deploy a feature set to the machine*
-  * The user deploys a feature set with `rustea pull <fs-name>`
-      * For only deploying script files use `rustea pull --script <fs-name>`
-      * For only deploying configuration files use `rustea pull --config <fs-name>`
-      * Use `rustea pull <fs-name> <path>` for pulling a single file or folder from the feature set
-      * The path is the absolute or relative path of the file or folder on the filesystem. 
-  * `rustea` fetches the content of the feature set and copies script files to `/usr/local/bin`
-    and configration files to their repository path name without the feature set name
-  * Local copies are overwritten
-  * Sudo is required if the files are copied into filesystem regions where the user has no rights
-
-### Contribution
-
-This crate and tool is still young so feature requests and issues are welcome.
-Feel free to open a pull requests if you implemented a new feature or closed something from the
-todo list. Open a new issues if you found bugs or want to provide notes on the code.
 
 ### License
 
