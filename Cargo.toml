@@ -30,3 +30,5 @@ tabwriter = "1.2.1"
 rpassword = "5.0.1"
 # Argument parsing
 argh = "0.1.6"
+# regex
+regex = "1"

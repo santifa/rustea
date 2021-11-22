@@ -32,6 +32,12 @@ pub enum Error {
     Rustea(String),
 }
 
+impl Error {
+    pub fn io(kind: io::ErrorKind, msg: String) -> Self {
+        Error::Io(io::Error::new(kind, msg))
+    }
+}
+
 #[derive(Debug)]
 pub enum ConfigError {
     WriteError(toml::ser::Error),

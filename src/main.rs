@@ -21,6 +21,7 @@ extern crate serde_json;
 extern crate tabwriter;
 extern crate toml;
 extern crate ureq;
+extern crate regex;
 
 use argh::FromArgs;
 use rustea::{updater::Updater, RemoteRepository, RusteaConfiguration};

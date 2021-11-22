@@ -26,6 +26,7 @@ use gitea::{
     gitea_api::{ContentEntry, ContentType, ContentsResponse},
     GiteaClient,
 };
+use regex::Regex;
 use serde_derive::{Deserialize, Serialize};
 use std::{
     env,
@@ -161,6 +162,7 @@ impl Display for RepositoryConfig {
 pub struct RemoteRepository {
     config: RusteaConfiguration,
     api: GiteaClient,
+    local_repo: LocalRepository,
 }
 
 impl Display for RemoteRepository {
@@ -188,8 +190,13 @@ impl RemoteRepository {
             &config.repo.owner,
         )
         .map_err(Error::Api)?;
-        check_folder(&config.script_folder)?;
-        Ok(RemoteRepository { config, api: c })
+        let local_repo = LocalRepository::new(&config.exclude, config.script_folder.clone())?;
+        //check_folder(&config.script_folder)?;
+        Ok(RemoteRepository {
+            config,
+            api: c,
+            local_repo,
+        })
     }
 
     /// This function queries the remote repository root and
@@ -303,10 +310,10 @@ impl RemoteRepository {
         script: bool,
         cmt_msg: Option<&str>,
     ) -> Result<()> {
-        let files = read_folder(path)?;
+        let files = self.local_repo.read_folder(path)?;
         for file in files {
-            let remote_path = to_remote_path(&file, script)?;
-            let content = read_file(&file)?;
+            let remote_path = self.local_repo.transform_to_remote_path(&file, script)?;
+            let content = LocalRepository::read_file(&file)?;
             self.api.create_or_update_file(
                 feature_set,
                 &remote_path,
@@ -348,23 +355,17 @@ impl RemoteRepository {
             if path.exists() {
                 self.push_files(&path, name, script, cmt_msg.as_deref())?;
             } else {
-                return Err(Error::Io(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("File {} not found.", path.display()),
-                )));
+                return Err(Error::io(io::ErrorKind::NotFound, format!("File {} not found.", path.display())));
             }
         } else {
             // Push everything found in the feature set
             let feature_set = self.api.get_folder(name)?;
-            let script_remote = format!("{}/scripts/", name);
 
             for entry in feature_set.content {
-                let script = entry.path.starts_with(&script_remote);
-                let file_path = to_local_path(
-                    &entry.path,
-                    script,
-                    &self.config.script_folder.to_string_lossy(),
-                )?;
+                let script = self.local_repo.check_script(&entry.path, name);
+                let file_path = self
+                    .local_repo
+                    .transform_to_local_path(&entry.path, script)?;
                 if file_path.exists() {
                     self.push_files(&file_path, name, script, cmt_msg.as_deref())?;
                 }
@@ -383,14 +384,12 @@ impl RemoteRepository {
     fn pull_files(&self, files: &[ContentEntry], script: bool) -> Result<()> {
         for file in files {
             let content = self.api.download_file(&file.path)?;
-            let path = to_local_path(
-                &file.path,
-                script,
-                &self.config.script_folder.to_string_lossy(),
-            )?;
+            let path = self
+                .local_repo
+                .transform_to_local_path(&file.path, script)?;
             // If we have a regular config file, check if the parent folder exists and is writable
             if !script {
-                check_folder(&path)?;
+                self.local_repo.check_path(&path)?;
             }
 
             let mut f = File::create(&path)?;
@@ -428,7 +427,6 @@ impl RemoteRepository {
         if !self.check_feature_set_exists(name)? {
             return Err(Error::Rustea(format!("No features set named {}", name)));
         }
-        let prefix = format!("{}/scripts", name);
         let feature_set = self.api.get_folder(name)?;
 
         if script || config {
@@ -436,11 +434,9 @@ impl RemoteRepository {
                 .content
                 .into_iter()
                 .filter(|e| {
-                    if script {
-                        e.path.starts_with(&prefix)
-                    } else {
-                        // We do not distinguish further between the cases
-                        !e.path.starts_with(&prefix)
+                    match script {
+                        true => self.local_repo.check_script(&e.path, name),
+                        false => !self.local_repo.check_script(&e.path, name),
                     }
                 })
                 .filter(|e| match &path {
@@ -452,7 +448,7 @@ impl RemoteRepository {
         } else {
             // Pull everything found in the feature set
             for file in feature_set.content {
-                let script = file.path.starts_with(&prefix);
+                let script = self.local_repo.check_script(&file.path, name);
                 self.pull_files(&[file], script)?;
             }
         }
@@ -484,10 +480,10 @@ impl RemoteRepository {
         self.new_feature_set(new_name, None)?;
         for file in feature_set.content {
             let content = self.api.download_file(&file.path)?;
-            let base_path = file.path.strip_prefix(name).unwrap();
+            let base_path = self.local_repo.strip_prefix(&file.path);
             self.api.create_or_update_file(
                 new_name,
-                base_path,
+                &base_path,
                 content.as_bytes(),
                 &self.config.repo.author,
                 &self.config.repo.email,
@@ -502,91 +498,131 @@ impl RemoteRepository {
     }
 }
 
-/// Read a file denoted by a `PathBuf` into a `Vec<u8>` or return the io Error.
-fn read_file(path: &std::path::Path) -> Result<Vec<u8>> {
-    let mut b: Vec<u8> = Vec::with_capacity(path.metadata()?.len() as usize);
-    File::open(path).and_then(|mut f| f.read_to_end(&mut b))?;
-    Ok(b)
+/// The `LocalRepository` operates on local folders and takes
+/// care of transforming pathes between remote and local
+#[derive(Debug)]
+struct LocalRepository {
+    regex: Regex,
+    script_dir: PathBuf,
+    script_prefix: String,
 }
 
-/// This function takes a path and either returns it directly as vector if
-/// the path denotes a singles file. Otherwise, the directory is crawled
-/// recursively and a vector of all known files below `Path` is returned.
-fn read_folder(path: &std::path::Path) -> Result<Vec<PathBuf>> {
-    let mut v: Vec<PathBuf> = vec![];
-    let path = path.canonicalize()?;
-    if path.is_dir() {
-        // Check if the original path is a folder
-        for entry in fs::read_dir(&path)? {
-            let entry = entry?;
-            if entry.path().is_dir() {
-                // Recursively push folders
+impl LocalRepository {
+    /// Create a new `LocalRepository`.
+    /// # Error
+    ///   - Throws an IO error if the `script_dir` can either not be created or
+    ///     it is not writable
+    fn new(regex: &str, script_dir: PathBuf) -> Result<Self> {
+        LocalRepository::create_path(&script_dir)?;
+        LocalRepository::writable_path(&script_dir)?;
+        let re = Regex::new(regex).unwrap();
 
-                if !entry.path().display().to_string().contains(".git") {
-                    let mut entries = read_folder(&entry.path())?;
-                    v.append(&mut entries);
-                }
-            } else {
-                // Push a single file
-                v.push(entry.path().canonicalize()?)
-            }
+        Ok(LocalRepository {
+            regex: re,
+            script_dir,
+            script_prefix: "/scripts/".into(),
+        })
+    }
+
+    /// Check if a path exists and create it if it doesn't.
+    fn create_path(path: &Path) -> Result<()> {
+        match path.exists() {
+            true => Ok(()),
+            false => fs::DirBuilder::new()
+                .recursive(true)
+                .create(&path)
+                .map_err(Error::Io),
         }
-    } else {
-        v.push(path);
     }
-    Ok(v)
-}
 
-/// This function converts a `PathBuf` into a remote path.
-/// The `path` either corresponds to a script path for a feature set or
-/// the path of a configuration file.
-fn to_remote_path(path: &std::path::Path, script: bool) -> Result<String> {
-    match script {
-        true => match path.file_name() {
-            Some(name) => Ok(format!("/scripts/{}", name.to_string_lossy())),
-            None => Err(Error::Io(io::Error::new(
-                io::ErrorKind::Other,
-                format!("{} not a valid file path", path.display()),
-            ))),
-        },
-        false => Ok(path.to_string_lossy().into_owned()),
+    /// Check if a path is writable and throw an error if not.
+    fn writable_path(path: &Path) -> Result<()> {
+        match path.metadata()?.permissions().readonly() {
+            true => Err(Error::io(io::ErrorKind::PermissionDenied, format!("{} is readonly", path.display()))),
+            false => Ok(()),
+        }
     }
-}
 
-/// This function converts a remote path from a gitea file into a local file.
-/// If the file ist a script file, the file name gets attached to the `script_dir`.
-/// Otherwise the whole path without the feature set name is returned.
-fn to_local_path(remote_path: &str, script: bool, script_dir: &str) -> Result<PathBuf> {
-    let split = match script {
-        true => remote_path.rsplit_once("/"),
-        false => remote_path.split_once("/"),
-    };
-    match split {
-        Some((_, name)) if script => Ok(PathBuf::from(format!("{}/{}", script_dir, name))),
-        Some((_, path)) if !script => Ok(PathBuf::from(format!("/{}", path))),
-        None | Some(_) => Err(Error::Io(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "Remote path {} can not converted to local one.",
-                remote_path
-            ),
-        ))),
+    // This function performs the create and writable path check
+    fn check_path(&self, path: &Path) -> Result<()> {
+        LocalRepository::create_path(path)?;
+        LocalRepository::writable_path(path)
     }
-}
 
-/// This function takes a folder path and creates that path if it
-/// not exists and checks if the path is writable afterwards.
-fn check_folder(path: &std::path::Path) -> Result<()> {
-    if !path.exists() {
-        fs::DirBuilder::new().recursive(true).create(&path)?;
+    // This function checks wether a string has a certain prefix
+    fn check_script(&self, path: &str, name: &str) -> bool {
+        let test = format!("{}{}", name, self.script_prefix);
+        path.starts_with(&test)
     }
-    if path.metadata()?.permissions().readonly() {
-        return Err(Error::Io(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!("Path {} not writable.", path.display()),
-        )));
+
+    // This function removes the `script_dir` prefix from a path
+    fn strip_prefix(&self, path: &str) -> String {
+        path.strip_prefix(&self.script_prefix)
+            .unwrap_or(path)
+            .into()
     }
-    Ok(())
+
+    /// This function converts a local path to a path for the remote repository.
+    fn transform_to_remote_path(&self, path: &Path, script: bool) -> Result<String> {
+        match script {
+            true => match path.file_name() {
+                Some(name) => Ok(format!("{}{}", self.script_prefix, name.to_string_lossy())),
+                None => Err(Error::io(io::ErrorKind::Other, format!("{} not a valid file path", path.display())))
+            },
+            false => Ok(path.display().to_string()),
+        }
+    }
+
+    /// This function converts a remote path to a local one.
+    /// A remote path is either `feature_set_name/path` or `feature_set_name/scripts/path`.
+    fn transform_to_local_path(&self, path: &str, script: bool) -> Result<PathBuf> {
+        let split = match script {
+            true => path.rsplit_once("/"),
+            false => path.split_once("/"),
+        };
+        match split {
+            Some((_, name)) if script => {
+                Ok([&self.script_dir, &PathBuf::from(name)].iter().collect())
+            }
+            Some((_, path)) if !script => Ok(["/", path].iter().collect()),
+            None | Some(_) => Err(Error::io(io::ErrorKind::InvalidInput, format!("Remote path {} can not converted to local one.", path)))
+        }
+    }
+
+    fn read_folder(&self, path: &Path) -> Result<Vec<PathBuf>> {
+        let mut v: Vec<PathBuf> = vec![];
+        let path = path.canonicalize()?;
+        if path.is_dir() {
+            // Check if the original path is a folder
+            for entry in fs::read_dir(&path)? {
+                let entry = entry?;
+                // We assume that a regex only applies if a folder is pushed
+                // since a file is explicitly pushed by the user.
+                if self.regex.is_match(&entry.path().display().to_string()) {
+                    continue;
+                }
+
+                if entry.path().is_dir() {
+                    // Recursively push folders
+                    let mut entries = self.read_folder(&entry.path())?;
+                    v.append(&mut entries);
+                } else {
+                    // Push a single file
+                    v.push(entry.path().canonicalize()?)
+                }
+            }
+        } else {
+            v.push(path);
+        }
+        Ok(v)
+    }
+
+    // This function reads a file into a byte buffer.
+    fn read_file(path: &Path) -> Result<Vec<u8>> {
+        let mut b: Vec<u8> = Vec::with_capacity(path.metadata()?.len() as usize);
+        File::open(path).and_then(|mut f| f.read_to_end(&mut b))?;
+        Ok(b)
+    }
 }
 
 #[cfg(test)]
